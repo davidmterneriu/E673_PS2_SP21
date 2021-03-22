@@ -29,7 +29,7 @@ texreg(q4_a_mod,digits = 3,stars = c(0.01,0.05,0.1))
 
 
 logit_hand=function(df,formula){
-  browser()
+  #browser()
   mm=model.matrix(formula,df)
   predictor_names=colnames(mm)
   form_string=as.character(formula)
@@ -44,8 +44,11 @@ logit_hand=function(df,formula){
   
   mle_function=function(d_v,model_mat,par_1){
     adj_model_mat=sweep(model_mat,2,par_1,FUN="*")
-    adj2=d_v*(colSums(adj_model_mat)-log(1+exp(colSums(adj_model_mat))))
-    res=-1*sum(adj2)
+    #prob_i=exp(rowSums(adj_model_mat))/(1+exp(rowSums(adj_model_mat)))
+    res=-log(1+exp(adj_model_mat))+adj_model_mat*d_v
+    #adj2=d_v*colSums(adj_model_mat)-log(1+exp(colSums(adj_model_mat)))
+    #res=-1*sum(adj2)
+    res=sum(res)
     return(res)
   }
   
@@ -65,7 +68,10 @@ logit_hand=function(df,formula){
 
 }
 
-logit_hand(df=swiss,y~age+I(age^2))
 
-mod2=glm(data=swiss,y~age+I(age^2),family = binomial(link="logit"))
+#colnames(swiss)
+
+logit_hand(df=swiss,y~age+I(age^2)+income+education+children_under+children_over+as.factor(citizen))
+
+mod2=glm(data=swiss,y~age+I(age^2)+income+education+children_under+children_over+as.factor(citizen),family = binomial(link="logit"))
 summary(mod2)
