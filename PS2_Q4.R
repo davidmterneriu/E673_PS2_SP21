@@ -30,6 +30,7 @@ texreg(q4_a_mod,digits = 3,stars = c(0.01,0.05,0.1))
 
 logit_hand=function(df,formula){
   #browser()
+  #https://www.r-bloggers.com/2011/12/logistic-regression/
   mm=model.matrix(formula,df)
   predictor_names=colnames(mm)
   form_string=as.character(formula)
