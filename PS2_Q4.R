@@ -29,7 +29,7 @@ texreg(q4_a_mod,digits = 3,stars = c(0.01,0.05,0.1))
 
 
 logit_hand=function(df,formula){
-  #browser()
+  browser()
   mm=model.matrix(formula,df)
   predictor_names=colnames(mm)
   form_string=as.character(formula)
@@ -39,7 +39,7 @@ logit_hand=function(df,formula){
   
   n=dim(mm)[1]
   p_1=dim(mm)[2]
-  par_1=rep(0.01,p_1)%>%as.matrix()
+  par_1=rep(0.1,p_1)%>%as.matrix()
   
   
   mle_function=function(d_v,model_mat,par_1){
@@ -49,7 +49,7 @@ logit_hand=function(df,formula){
     return(res)
   }
   
-  
+  #y2=mle_function(par_1,d_v=dv,model_mat=mm)
  
   test_1=optim(par=par_1,fn=mle_function,d_v=dv,model_mat=mm,hessian = T)
   par_est=test_1$par
@@ -67,3 +67,5 @@ logit_hand=function(df,formula){
 
 logit_hand(df=swiss,y~age+I(age^2))
 
+mod2=glm(data=swiss,y~age+I(age^2),family = binomial(link="logit"))
+summary(mod2)
