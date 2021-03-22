@@ -39,30 +39,29 @@ logit_hand=function(df,formula){
   
   n=dim(mm)[1]
   p_1=dim(mm)[2]
-  par_1=rep(0.1,p_1)%>%as.matrix()
+  par_1=rep(0,p_1)%>%as.matrix()
   
   
-  mle_function=function(d_v,model_mat,par_1){
-    adj_model_mat=sweep(model_mat,2,par_1,FUN="*")
-    #prob_i=exp(rowSums(adj_model_mat))/(1+exp(rowSums(adj_model_mat)))
-    res=-log(1+exp(adj_model_mat))+adj_model_mat*d_v
-    #adj2=d_v*colSums(adj_model_mat)-log(1+exp(colSums(adj_model_mat)))
-    #res=-1*sum(adj2)
-    res=sum(res)
-    return(res)
+  
+  mle_function=function(par,x,y){
+    loglik_v<- sum(-y*log(1 + exp(-(x%*%par))) - (1-y)*log(1 + exp(x%*%par)))
+    return(-1*loglik_v)
   }
   
-  #y2=mle_function(par_1,d_v=dv,model_mat=mm)
  
-  test_1=optim(par=par_1,fn=mle_function,d_v=dv,model_mat=mm,hessian = T)
-  par_est=test_1$par
-  hessian=test_1$hessian
-  val_test=test_1$value
-  se_val=diag(hessian)%>%sqrt()
-  z_val=par_est/se_val
+  test_1=optim(par=par_1,fn=mle_function,y=dv,x=mm)
+  beta=test_1$par
+  p = 1/(1+exp(-mm%*%beta))
+  V = array(0,dim=c(dim(mm)[1],dim(mm)[1]))
+  diag(V) = p*(1-p)
+  IB = t(mm)%*%V%*%mm
+ 
+  se_val=diag(solve(IB))%>%sqrt()
+  z_val=beta/se_val
   p_val=2*pnorm(-abs(z_val))
-  result_df=data.frame(term=colnames(mm),estimate=par_est,std.err=se_val,z.value=z_val,
+  result_df=data.frame(term=colnames(mm),estimate=beta,std.err=se_val,z.value=z_val,
                        p.value=p_val)
+  rownames(result_df)<-c()
   return(result_df)
   
 
@@ -73,5 +72,10 @@ logit_hand=function(df,formula){
 
 logit_hand(df=swiss,y~age+I(age^2)+income+education+children_under+children_over+as.factor(citizen))
 
-mod2=glm(data=swiss,y~age+I(age^2)+income+education+children_under+children_over+as.factor(citizen),family = binomial(link="logit"))
+mod2=glm(data=swiss,y~age+I(age^2)+income+education+children_under+children_over+as.factor(citizen),family = binomial)
 summary(mod2)
+
+
+mod2$qr$qr
+
+
