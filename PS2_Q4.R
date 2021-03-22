@@ -30,7 +30,7 @@ texreg(q4_a_mod,digits = 3,stars = c(0.01,0.05,0.1))
 
 logit_hand=function(df,formula){
   #browser()
-  #https://www.r-bloggers.com/2011/12/logistic-regression/
+  
   mm=model.matrix(formula,df)
   predictor_names=colnames(mm)
   form_string=as.character(formula)
@@ -40,18 +40,18 @@ logit_hand=function(df,formula){
   
   n=dim(mm)[1]
   p_1=dim(mm)[2]
-  par_1=rep(0,p_1)%>%as.matrix()
+  par_1=rep(1,p_1)%>%as.matrix()
   
   
-  
+  options(warn=-1)
   mle_function=function(par,x,y){
     loglik_v<- sum(-y*log(1 + exp(-(x%*%par))) - (1-y)*log(1 + exp(x%*%par)))
     return(-1*loglik_v)
   }
   
  
-  test_1=optim(par=par_1,fn=mle_function,y=dv,x=mm)
-  beta=test_1$par
+  test_1=nlm(p=par_1,f=mle_function,y=dv,x=mm)
+  beta=test_1$estimate
   p = 1/(1+exp(-mm%*%beta))
   V = array(0,dim=c(dim(mm)[1],dim(mm)[1]))
   diag(V) = p*(1-p)
@@ -63,17 +63,16 @@ logit_hand=function(df,formula){
   result_df=data.frame(term=colnames(mm),estimate=beta,std.err=se_val,z.value=z_val,
                        p.value=p_val)
   rownames(result_df)<-c()
-  return(result_df)
+  #AIC=2*p_1-2*test_1$minimum
+  return(list(res=result_df))
   
 
 }
 
-
-#colnames(swiss)
-
 logit_hand(df=swiss,y~age+I(age^2)+income+education+children_under+children_over+as.factor(citizen))
 
-mod2=glm(data=swiss,y~age+I(age^2)+income+education+children_under+children_over+as.factor(citizen),family = binomial)
+mod2=glm(data=swiss,y~age+I(age^2)+income+education+children_under+children_over+as.factor(citizen),
+         family = binomial(link = "logit"))
 summary(mod2)
 
 
