@@ -145,7 +145,34 @@ automobile%>%group_by(ye)%>%
   select(co,ye,special_mean,pr_s)%>%
   summarise(cor=cor(special_mean,pr_s))%>%View()
 
+
+year_list=automobile$ye%>%unique()
+model_list=automobile$co%>%unique()
+
+
+
+temp_df=data.frame()
+
+for(i in 1:length(year_list)){
+  for(j in 1:length(model_list)){
+    te_df=automobile%>%filter(ye %in% year_list[i] & co %in% model_list[j]==F)
+    te_res=te_df%>%summarise(speed_z=mean(sp),size_z=mean(size),hp_wt_z=mean(hp_wt))
+    te_res=te_res%>%mutate(ye=year_list[i],co=model_list[j])
+    temp_df=rbind(temp_df,te_res)
+  }
+}
+
+
+automobile=automobile%>%inner_join(temp_df)
+
+
 library(AER)
 
+iv_mod1=ivreg(data=automobile,delta_jt~hp_wt+size+sp+pr_s|hp_wt+size+sp+hp_wt_z+size_z+speed_z)
+summary(iv_mod1)
+stargazer(iv_mod1,digits=3)
+b1=summary(iv_mod1, vcov = sandwich, df = Inf, diagnostics = TRUE)
+
+kable(b1[["diagnostics"]],format = "latex",digits = 3,booktabs = T, linesep = "")
 
 
