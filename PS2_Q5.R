@@ -20,7 +20,7 @@ options(warn=-1)
 # (1) Descriptive Stats
 ###########################################################################################
 
-#automobile <- read_csv("automobile.csv")
+#automobile2 <- read_csv("automobile.csv")
 
 automobile <- read_dta("automobile.dta")
 
@@ -82,3 +82,60 @@ kableExtra::kable(auto_sum2,format = "latex",booktabs = T, linesep = "",digits =
 
 #Part 2.a 
 
+
+automobile=automobile%>%mutate(rev_t=qu*pr)%>%group_by(ye)%>%
+  mutate(year_sales=sum(qu)%>%as.numeric(),
+         year_rev=sum(rev_t))%>%
+  ungroup()%>%
+  mutate(mkt_share_t=qu/year_sales,
+         mkt_share_t_v=rev_t/year_rev,
+         delta_jt=log(mkt_share_t)-log(1-mkt_share_t),
+         delta_jt_v=log(mkt_share_t_v)-log(1-mkt_share_t_v))
+
+
+automobile%>%select(ye,co,delta_jt,delta_jt_v)%>%
+  gather(key="delta_type",v="utility",-c(1,2))%>%
+  ggplot(aes(x=utility,color=delta_type))+
+  geom_density()+
+  theme_bw()+
+  labs(x="Delta")+
+  scale_color_manual(name="Mkt Share Type",labels=c("Units Sold","Revenue"),
+                     values=c("blue","red"))
+
+
+automobile%>%ggplot(aes(x=delta_jt,y=delta_jt_v))+
+  geom_point()+
+  labs(x="Units Sold",y="Revenue")+
+  theme_bw()+
+  stat_smooth(method = "lm")
+
+
+automobile%>%group_by(ye)%>%
+  mutate(mkt_rank=rank(mkt_share_t),
+         mkt_rank_v=rank(mkt_share_t_v))%>%
+  ungroup()%>%
+  mutate(mkt_dif=mkt_rank-mkt_rank_v)%>%
+  group_by(ye)%>%
+  summarise(mean(mkt_dif))
+
+#ranks stay the same on average.
+
+
+
+
+automobile=automobile%>%group_by(ye,cla)%>%
+  mutate(cla_share=qu/sum(qu))%>%
+  ungroup()%>%
+  mutate(delta_jt_c=log(cla_share)-log(1-cla_share),
+         pr_s=pr/1000)
+
+
+q2_a_mod=lm(data=automobile,delta_jt~hp_wt+size+sp+pr_s)
+q2_a_mod2=lm(data=automobile,delta_jt~hp_wt+size+sp+pr_s+cla_share)
+
+
+
+stargazer(q2_a_mod,q2_a_mod2,digits = 3)
+
+
+#Part 2.b 
