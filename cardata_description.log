@@ -1,0 +1,55 @@
+---------------------------------------------------------------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  /Users/sweiergr/workspace/e673/src/problem_sets/ps_2/cardata_description.log
+  log type:  text
+ opened on:  11 Mar 2019, 12:09:34
+
+. 
+. * Describe variable names and structure of the data.
+. describe
+
+Contains data from automobile.dta
+  obs:           668                          
+ vars:            35                          8 Oct 2016 14:13
+ size:       105,544                          
+---------------------------------------------------------------------------------------------------------------------------------------
+              storage   display    value
+variable name   type    format     label      variable label
+---------------------------------------------------------------------------------------------------------------------------------------
+ye              byte    %9.0g                 year (=first dimension of panel)
+co              int     %9.0g                 model code (=third dimension of panel)
+brd             byte    %21.0g     brand      brand code
+type            str40   %40s                  name of brand and model
+model           str11   %11s                  name of model
+org             byte    %13.0g     origin     origin code (demand side, country with which consumers associate model)
+loc             byte    %13.0g     location   location code (production side, country where producer produce model)
+cla             byte    %12.0g     class      class or segment code
+home            byte    %9.0g                 domestic car dummy (appropriate interaction of org and ma)
+frm             byte    %25.0g     firm       firm code
+qu              float   %9.0g                 sales (number of new car registrations)
+cy              float   %9.0g                 cylinder volume or displacement (in cc)
+hp              float   %9.0g                 horsepower (in kW)
+we              int     %9.0g                 weight (in kg)
+pl              float   %9.0g                 places (number, not reliable variable)
+do              float   %9.0g                 doors (number, not reliable variable)
+le              float   %9.0g                 length (in cm)
+wi              float   %9.0g                 width (in cm)
+he              float   %9.0g                 height (in cm)
+li              float   %9.0g                 average of li1, li2, li3 (used in papers)
+sp              float   %9.0g                 maximum speed (km/hour)
+ac              float   %9.0g                 time to acceleration (in seconds from 0 to 100 km/h, some from 0 to 96 km/h)
+pr              float   %9.0g                 price (in destination currency including V.A.T.)
+princ           float   %9.0g                 =pr/(ngdp/pop): price relative to per capita income (often used in demand model)
+eurpr           float   %9.0g                 =pr/avdexr: price in common currency (in SDR times 1.2956 to interpret in Euros)
+exppr           float   %9.0g                 =pr/avexr: price in exporter currency
+avexr           float   %9.0g                 av. exchange rate of exporter country (exporter 'loc' currency per SDR)
+avdexr          float   %9.0g                 av. exchange rate of destination country (destination 'ma' currency per SDR)
+avcpr           float   %9.0g                 av. consumer price index of exporter country
+avppr           float   %9.0g                 av. producer price index of exporter country
+avdcpr          float   %9.0g                 av. consumer price index of destination country
+avdppr          float   %9.0g                 av. producer price index of destination country
+xexr            float   %9.0g                 avdexr/avexr
+tax             float   %9.0g                 percentage VAT
+pop             float   %9.0g                 population
+---------------------------------------------------------------------------------------------------------------------------------------
+Sorted by: ye  co
