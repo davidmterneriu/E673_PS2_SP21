@@ -139,3 +139,13 @@ stargazer(q2_a_mod,q2_a_mod2,digits = 3)
 
 
 #Part 2.b 
+
+automobile%>%group_by(ye)%>%
+  mutate(special_mean = (sum(pr_s) - pr_s)/(n()-1))%>%
+  select(co,ye,special_mean,pr_s)%>%
+  summarise(cor=cor(special_mean,pr_s))%>%View()
+
+library(AER)
+
+
+
