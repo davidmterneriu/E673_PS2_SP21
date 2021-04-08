@@ -354,10 +354,21 @@ sp_df_super2=rbind(sp_df%>%select(j,markup_iv)%>%top_n(markup_iv,n=5),
 
 sp_df_super$markup_base=sp_df_super$markup_base%>%as.numeric()
 
-sp_df_super$j2=sp_df_super2$j
-sp_df_super$markup_iv=sp_df_super2$markup_iv%>%as.numeric()
+
+sp_df_super<-sp_df_super%>%inner_join(select(j=type,auto_95,pr_s,hp_wt,size,sp))
+
+
+sp_df_super2$markup_iv<-sp_df_super2$markup_iv%>%as.numeric()
+sp_df_super2<-sp_df_super2%>%inner_join(select(j=type,auto_95,pr_s,hp_wt,size,sp))
+
 
 #sp_df_superf=cbind(sp_df_superf$markup_base,sp_df_superf$markup_iv)%>%as.data.frame()
 
 kable(sp_df_super,format = "latex",digits = 2,booktabs = T, linesep = "")
+kable(sp_df_super2,format = "latex",digits = 2,booktabs = T, linesep = "")
+
+
+###########################################################################################
+# (3) Logit Model 
+###########################################################################################
 
