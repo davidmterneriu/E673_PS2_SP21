@@ -132,10 +132,10 @@ automobile=automobile%>%group_by(ye,cla)%>%
 
 q2_a_mod=lm(data=automobile,delta_jt~hp_wt+size+sp+pr_s)
 q2_a_mod2=lm(data=automobile,delta_jt~hp_wt+size+sp+pr_s+cla_share)
+q2_a_mod3=lm(data=automobile,delta_jt~hp_wt+size+sp+pr_s+log(cla_share))
 
 
-
-stargazer(q2_a_mod,q2_a_mod2,digits = 3)
+stargazer(q2_a_mod,q2_a_mod2,q2_a_mod3,digits = 3)
 
 
 #Part 2.b 
@@ -168,11 +168,31 @@ automobile=automobile%>%inner_join(temp_df)
 
 library(AER)
 
-iv_mod1=ivreg(data=automobile,delta_jt~hp_wt+size+sp+pr_s|hp_wt+size+sp+hp_wt_z+size_z+speed_z)
-summary(iv_mod1)
-stargazer(iv_mod1,digits=3)
+iv_mod1=ivreg(data=automobile,delta_jt~hp_wt+size+sp+pr_s
+              |hp_wt+size+sp+hp_wt_z+size_z+speed_z)
+iv_mod2=ivreg(data=automobile,delta_jt~hp_wt+size+sp+pr_s+log(cla_share)
+              |hp_wt+size+sp+log(cla_share)+hp_wt_z+size_z+speed_z)
+
+
+summary(iv_mod2)
+stargazer(iv_mod1,iv_mod2,digits=3)
 b1=summary(iv_mod1, vcov = sandwich, df = Inf, diagnostics = TRUE)
+b2=summary(iv_mod1, vcov = sandwich, df = Inf, diagnostics = TRUE)
 
 kable(b1[["diagnostics"]],format = "latex",digits = 3,booktabs = T, linesep = "")
+kable(b2[["diagnostics"]],format = "latex",digits = 3,booktabs = T, linesep = "")
+
+auto_95=automobile%>%filter(ye==95)
+
+which_per<-Vectorize(which_per,vectorize.args = "p")
+
+
+cars_95=auto_95$type[which_per(auto_95$pr_s,seq(0.1,1,by=0.1))]
+
+auto_95f=auto_95%>%filter(type %in% cars_95)%>%
+  select(type,pr_s,mkt_share_t,cla,cla_share)
+
+
+
 
 
