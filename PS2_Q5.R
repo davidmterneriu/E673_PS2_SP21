@@ -171,13 +171,13 @@ library(AER)
 iv_mod1=ivreg(data=automobile,delta_jt~hp_wt+size+sp+pr_s
               |hp_wt+size+sp+hp_wt_z+size_z+speed_z)
 iv_mod2=ivreg(data=automobile,delta_jt~hp_wt+size+sp+pr_s+log(cla_share)
-              |hp_wt+size+sp+log(cla_share)+hp_wt_z+size_z+speed_z)
+              |hp_wt+size+sp+hp_wt_z+size_z+speed_z)
 
 
 summary(iv_mod2)
 stargazer(iv_mod1,iv_mod2,digits=3)
 b1=summary(iv_mod1, vcov = sandwich, df = Inf, diagnostics = TRUE)
-b2=summary(iv_mod1, vcov = sandwich, df = Inf, diagnostics = TRUE)
+b2=summary(iv_mod2, vcov = sandwich, df = Inf, diagnostics = TRUE)
 
 kable(b1[["diagnostics"]],format = "latex",digits = 3,booktabs = T, linesep = "")
 kable(b2[["diagnostics"]],format = "latex",digits = 3,booktabs = T, linesep = "")
@@ -194,5 +194,170 @@ auto_95f=auto_95%>%filter(type %in% cars_95)%>%
 
 
 
+elastic_df=expand.grid(j=auto_95f$type,k=auto_95f$type)%>%as.data.frame()
 
+elastic_df=elastic_df%>%inner_join(select(auto_95f,j=type,pr_j=pr_s,mkt_j=mkt_share_t,
+                               cla_j=cla,cla_share_j=cla_share))%>%
+  inner_join(select(auto_95f,k=type,pr_k=pr_s,mkt_k=mkt_share_t,
+                    cla_k=cla,cla_share_k=cla_share))
+
+
+
+
+nested_elastic=function(alpha,sig,p_j,p_k,share_j,share_k,share_jc,share_kc,case_n){
+  #browser()
+  if(case_n=="C1"){
+    res=alpha*p_j/(1-sig)*(1-sig*share_jc-(1-sig)*share_j)
+    return(res)
+  }else if (case_n=="C2"){
+    res=-alpha*p_k/(1-sig)*(sig*share_jc+(1-sig)*share_k)
+    return(res)
+  }else{
+    res=-alpha*p_k*share_k
+    return(res)
+  }
+}
+
+
+# Extracting alpha/sigma
+iv_alpha=coef(iv_mod2)[5]%>%as.numeric()
+iv_sig=coef(iv_mod2)[6]%>%as.numeric()
+
+
+
+base_alpha=coef(q2_a_mod3)[5]%>%as.numeric()
+base_sig=coef(q2_a_mod3)[6]%>%as.numeric()
+
+elastic_df=elastic_df%>%
+  mutate(case_n=ifelse(j==k,"C1",ifelse(cla_j==cla_k,"C2","C3")))
+
+elastic_df$elastic_b=0
+elastic_df$elastic_iv=0
+
+for(i in 1:nrow(elastic_df)){
+  elastic_df$elastic_b[i]=nested_elastic(alpha=base_alpha,sig=base_sig,
+                                         p_j=elastic_df$pr_j[i],p_k=elastic_df$pr_k[i],
+                           share_j=elastic_df$mkt_j[i],share_k=elastic_df$mkt_k[i],
+                           share_jc=elastic_df$cla_share_j[i],
+                           share_kc=elastic_df$cla_share_k[i],
+                           case_n=elastic_df$case_n[i])
+  elastic_df$elastic_iv[i]=nested_elastic(alpha=iv_alpha,sig=iv_sig,
+                                         p_j=elastic_df$pr_j[i],p_k=elastic_df$pr_k[i],
+                                         share_j=elastic_df$mkt_j[i],share_k=elastic_df$mkt_k[i],
+                                         share_jc=elastic_df$cla_share_j[i],
+                                         share_kc=elastic_df$cla_share_k[i],
+                                         case_n=elastic_df$case_n[i])
+  
+}
+
+
+
+base_mat<-elastic_df%>%select(j,k,elastic_b)%>%
+  pivot_wider(names_from = j, values_from = elastic_b)
+
+
+iv_mat<-elastic_df%>%select(j,k,elastic_iv)%>%
+  pivot_wider(names_from = j, values_from = elastic_iv)
+
+
+
+
+ggplot(elastic_df, aes(x=reorder(j,pr_j), y=reorder(k,pr_k))) +
+  geom_tile(aes(fill = elastic_b), colour = "grey50")+
+  geom_label(aes(label=round(elastic_b,3),color=case_n))+
+  labs(x="",y="",fill="Elasticity",title="Part A Own/Cross Price Elasticity ")+
+  ggthemes::theme_clean()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  scale_color_manual(name="Case",
+                     values=c("Red", "Blue", "Green"),
+                     labels=c("Own Price", "W/in Basket", "W/o Basket"))
+
+
+ggplot(elastic_df, aes(x=reorder(j,pr_j), y=reorder(k,pr_k))) +
+  geom_tile(aes(fill = elastic_iv), colour = "grey50")+
+  geom_label(aes(label=round(elastic_iv,3),color=case_n))+
+  labs(x="",y="",fill="Elasticity",title="Part B Own/Cross Price Elasticity ")+
+  ggthemes::theme_clean()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  scale_color_manual(name="Case",
+                     values=c("Red", "Blue", "Green"),
+                     labels=c("Own Price", "W/in Basket", "W/o Basket"))
+
+
+mod2=lm(data=elastic_df,elastic_iv~elastic_b)
+summary(mod2)
+
+kable(base_mat,format = "latex",digits = 3,booktabs = T, linesep = "")
+kable(b2[["diagnostics"]],format = "latex",digits = 3, linesep = "")
+
+#part c: markups 
+
+elastic_df2=expand.grid(j=auto_95$type,k=auto_95$type)%>%as.data.frame()
+
+elastic_df2=elastic_df2%>%inner_join(select(auto_95,j=type,pr_j=pr_s,mkt_j=mkt_share_t,
+                                          cla_j=cla,cla_share_j=cla_share,frm_j=frm))%>%
+  inner_join(select(auto_95,k=type,pr_k=pr_s,mkt_k=mkt_share_t,
+                    cla_k=cla,cla_share_k=cla_share,frm_k=frm))%>%
+  mutate(case_n=ifelse(j==k,"C1",ifelse("cla_j"=="cla_k","C2","C3")))
+
+
+
+
+elastic_df2$elastic_b=0
+elastic_df2$elastic_iv=0
+
+for(i in 1:nrow(elastic_df2)){
+  print(i/nrow(elastic_df2))
+  elastic_df2$elastic_b[i]=nested_elastic(alpha=base_alpha,sig=base_sig,
+                                         p_j=elastic_df2$pr_j[i],p_k=elastic_df2$pr_k[i],
+                                         share_j=elastic_df2$mkt_j[i],share_k=elastic_df2$mkt_k[i],
+                                         share_jc=elastic_df2$cla_share_j[i],
+                                         share_kc=elastic_df2$cla_share_k[i],
+                                         case_n=elastic_df2$case_n[i])
+  elastic_df2$elastic_iv[i]=nested_elastic(alpha=iv_alpha,sig=iv_sig,
+                                          p_j=elastic_df2$pr_j[i],p_k=elastic_df2$pr_k[i],
+                                          share_j=elastic_df2$mkt_j[i],share_k=elastic_df2$mkt_k[i],
+                                          share_jc=elastic_df2$cla_share_j[i],
+                                          share_kc=elastic_df2$cla_share_k[i],
+                                          case_n=elastic_df2$case_n[i])
+  
+}
+
+elastic_df2=elastic_df2%>%mutate(delta_jr_base=ifelse(frm_j==frm_k,-1*elastic_b*mkt_j/pr_k,0),
+                     delta_jr_iv=ifelse(frm_j==frm_k,-1*elastic_iv*mkt_j/pr_k,0))
+
+
+delta_jr_base_mat=elastic_df2%>%select(j,k,delta_jr_base)%>%
+  pivot_wider(names_from = j, values_from = delta_jr_base)%>%
+  select(-k)%>%
+  as.matrix()
+
+delta_jr_iv_mat=elastic_df2%>%select(j,k,delta_jr_iv)%>%
+  pivot_wider(names_from = j, values_from = delta_jr_iv)%>%
+  select(-k)%>%
+  as.matrix()
+
+
+sp_df<-elastic_df2%>%select(j,frm_j,mkt_j,pr_j)%>%unique.data.frame()
+
+sp_df$markup_base=solve(delta_jr_base_mat)%*%sp_df$mkt_j/sp_df$pr_j*100
+sp_df$markup_iv=solve(delta_jr_iv_mat)%*%sp_df$mkt_j/sp_df$pr_j*100
+
+sp_df<-sp_df%>%mutate(price_p=percent_rank(pr_j)*100)
+
+
+sp_df_super=rbind(sp_df%>%select(j,markup_base)%>%top_n(markup_base,n=5),
+      sp_df%>%select(j,markup_base)%>%top_n(-markup_base,n=5))%>%arrange(-markup_base)
+
+sp_df_super2=rbind(sp_df%>%select(j,markup_iv)%>%top_n(markup_iv,n=5),
+                    sp_df%>%select(j,markup_iv)%>%top_n(-markup_iv,n=5))%>%arrange(-markup_iv)
+
+sp_df_super$markup_base=sp_df_super$markup_base%>%as.numeric()
+
+sp_df_super$j2=sp_df_super2$j
+sp_df_super$markup_iv=sp_df_super2$markup_iv%>%as.numeric()
+
+#sp_df_superf=cbind(sp_df_superf$markup_base,sp_df_superf$markup_iv)%>%as.data.frame()
+
+kable(sp_df_super,format = "latex",digits = 2,booktabs = T, linesep = "")
 
