@@ -587,7 +587,7 @@ GMMM_fun<-function(betas,ns){
   #GMM Time!
   gmm_val=t(xi)%*%iv_mat%*%weight_mat%*%t(iv_mat)%*%xi
   gmm_val=as.numeric(gmm_val)
-  print(paste("Current GMM value: ",gmm_val,sep=""))
+  #print(paste("Current GMM value: ",gmm_val,sep=""))
   return(gmm_val)
 }
 
@@ -601,7 +601,7 @@ GMMM_fun(betas=beta_guess,ns=20)
 
 start_time <- Sys.time()
 
-blp_demand=optim(par=beta_guess,ns=10,fn=GMMM_fun,control=list(trace=0))
+blp_demand=optim(par=beta_guess,ns=10,fn=GMMM_fun,control=list(trace=1))
 #blp_demand=nlm(p=beta_guess,ns=20,f=GMMM_fun,print.level = 2)
 end_time <- Sys.time()
 
