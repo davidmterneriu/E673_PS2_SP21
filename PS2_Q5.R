@@ -553,7 +553,7 @@ GMMM_fun<-function(betas,ns){
   while(counter<1000 & current_error>err_tol){
    
     counter=counter+1
-    print(paste("Inner loop error: ",current_error))
+   # print(paste("Inner loop error: ",current_error))
     top=mu_mat
     for(i in 1:nrow(mu_mat)){
       top[i,]<-delta_jt[i]+top[i,]
@@ -570,17 +570,25 @@ GMMM_fun<-function(betas,ns){
     pred_share_df=pred_share_df%>%mutate(delta_jt_1=delta_jt+log(mshare)-log(abs(pred_share)),
                            error_term=abs(delta_jt_1-delta_jt))
     current_error=max(pred_share_df$error_term)
+    
+    if(is.nan(current_error)){
+      print("Problem with inner loop!")
+      invokeRestart("abort")
+    }
+    
     delta_jt=pred_share_df$delta_jt_1%>%as.numeric()
   }
-  browser()
+  #browser()
   delta=delta_jt%>%as.numeric()
   
+  xi_model=lm(delta~0+X1)
+  xi=resid(xi_model)
+  
   #GMM Time!
-  blin=solve(t(X1)%*%iv_mat%*%weight_mat%*%t(iv_mat)%*%X1)%*%(t(X1)%*%iv_mat%*%weight_mat%*%t(iv_mat)%*%delta)
-  error_term=delta-X1%*%blin
-  gmm_val=t(error_term)%*%iv_mat%*%weight_mat%*%t(iv_mat)%*%error_term
-  
-  
+  gmm_val=t(xi)%*%iv_mat%*%weight_mat%*%t(iv_mat)%*%xi
+  gmm_val=as.numeric(gmm_val)
+  print(paste("Current GMM value: ",gmm_val,sep=""))
+  return(gmm_val)
 }
 
 GMMM_fun(betas=beta_guess,ns=20)
@@ -592,7 +600,9 @@ GMMM_fun(betas=beta_guess,ns=20)
 
 
 start_time <- Sys.time()
-blp_demand=nlm(p=beta_guess,ns=20,f=GMMM_fun,print.level = 2)
+
+blp_demand=optim(par=beta_guess,ns=10,fn=GMMM_fun,control=list(trace=0))
+#blp_demand=nlm(p=beta_guess,ns=20,f=GMMM_fun,print.level = 2)
 end_time <- Sys.time()
 
 start_time-end_time
