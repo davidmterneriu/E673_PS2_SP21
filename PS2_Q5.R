@@ -22,6 +22,11 @@ options(warn=-1)
 
 #automobile2 <- read_csv("automobile.csv")
 
+#automobile2%>%group_by(ye)%>%
+#  summarise(sum(mshare))
+#  
+#  NEED TO RE-DO MKT SHARE VAR
+
 automobile <- read_dta("automobile.dta")
 
 
@@ -369,6 +374,226 @@ kable(sp_df_super2,format = "latex",digits = 2,booktabs = T, linesep = "")
 
 
 ###########################################################################################
-# (3) Logit Model 
+# (3) Random coecients logit model
 ###########################################################################################
+
+if(FALSE){
+#install.packages("BLPestimatoR")
+library(BLPestimatoR)
+
+
+int_delta=automobile$delta_jt%>%as.numeric()
+
+nevos_mod<-as.formula("mkt_share_t~0+pr_s+hp_wt+size+sp|0+hp_wt+size+sp|0+pr_s+size+sp|0+speed_z+size_z+hp_wt_z")
+
+
+
+
+
+auto_data<-BLP_data(model=nevos_mod,
+                    market_identifier = "ye",
+                    product_identifier = "co",
+                    productData = automobile,
+                    par_delta = "delta_jt",
+                    integration_method = "MLHS",
+                    integration_accuracy = 20, integration_seed = 213)
+
+gmm_obj_wrap(blp_data=auto_data,par_theta2=starting_theta)
+
+
+auto_data$data$X_rand
+
+starting_theta=c("pr_s"=-1,"size"=1,"sp"=1)
+starting_theta=as.matrix(starting_theta)
+colnames(starting_theta)<-"unobs_sd"
+
+auto_est<-estimateBLP(blp_data = auto_data,par_theta2 = starting_theta,
+                      solver_method = "L-BFGS-B", solver_maxit = 1000, solver_reltol = 1e-6,
+                      standardError = "heteroskedastic",
+                      extremumCheck = FALSE,
+                      printLevel = 1)
+
+
+
+nevos_model <- as.formula("share ~  price + productdummy |
+    0+ productdummy |
+    price + sugar + mushy |
+    0+ IV1 + IV2 + IV3 + IV4 + IV5 + IV6 + IV7 + IV8 + IV9 + IV10 + 
+    IV11 + IV12 + IV13 + IV14 + IV15 + IV16 + IV17 + IV18 + IV19 + IV20")
+
+
+names(originalDraws_cereal)
+
+b1=originalDraws_cereal
+names(originalDraws_cereal)[1] <- "(Intercept)"
+
+productData_cereal$startingGuessesDelta <- c(log(w_guesses_cereal)) # include orig. draws in the product data
+
+cereal_data <- BLP_data(
+  model = nevos_model,
+  market_identifier = "cdid",
+  par_delta = "startingGuessesDelta",
+  product_identifier = "product_id",
+  productData = productData_cereal,
+  demographic_draws = demographicData_cereal,
+  blp_inner_tol = 1e-6, blp_inner_maxit = 5000,
+  integration_draws = originalDraws_cereal,
+  integration_weights = rep(1 / 20, 20)
+)
+
+theta_guesses_cereal[theta_guesses_cereal == 0] <- NA
+colnames(theta_guesses_cereal) <- c("unobs_sd", "income", "incomesq", "age", "child")
+rownames(theta_guesses_cereal) <- c("(Intercept)", "price", "sugar", "mushy")
+
+theta_guesses_cereal[,-1]<-NA
+
+
+
+cereal_est <- estimateBLP(
+  blp_data = cereal_data,
+  par_theta2 = theta_guesses_cereal,
+  solver_method = "BFGS", solver_maxit = 1000, solver_reltol = 1e-6,
+  standardError = "heteroskedastic",
+  extremumCheck = FALSE,
+  printLevel = 1
+)
+
+
+summary(cereal_est)
+}
+
+
+
+###########################################################################################
+# (3) BLP by hand
+###########################################################################################
+
+
+#######################################
+# New Share definition 
+#######################################
+
+
+
+# Main guides: 
+# Rasmusen (IU prof with crazy tweets): https://www.rasmusen.org/published/blp-rasmusen.pdf
+# Sudhir: https://faculty.fuqua.duke.edu/econometrics/presentations/2013/Sudhir-Demand%20Estimation-Aggregate%20Data%20Workshop-updated%202013.pdf
+
+
+automobile=automobile%>%mutate(mshare=qu/pop)
+
+m_share_df<-select(automobile,mshare,ye,co)%>%
+  group_by(ye)%>%
+  mutate(mshare_0=sum(mshare)-mshare)%>%
+  ungroup()%>%
+  mutate(delta_jt=log(mshare)-log(mshare_0))
+
+
+#X1: price, hp_wt, and prod dummies:  explanatory variables common to all consumers
+#X2: price, size, and speed: observed explanatory variables with random coefficients 
+
+brd_dummy=automobile$brd%>%as.numeric()
+
+prod_dummy=fastDummies::dummy_cols(brd_dummy)
+prod_dummy=prod_dummy[,-1]%>%as.matrix()
+
+
+X1=cbind(price=automobile$pr_s,hp_wt=automobile$hp_wt,prod_dummy)%>%as.matrix()
+
+num_X1=dim(X1)[2]
+
+#solve(t(X1)%*%X1)
+
+X2<-cbind(price=automobile$pr_s,size=automobile$size,speed=automobile$sp)%>%
+  as.matrix()
+
+#number of random coefficients 3= 1 (price) + 2 characteristics (size+speed)
+K=dim(xlin)[2]
+
+#number of simulations/consumers 
+n_cons=20
+
+automobile=automobile%>%mutate(cons=1)
+
+
+#IV matrix: speed_z,hp_wt_z,size_z
+iv_mat<-automobile%>%select(speed_z,hp_wt_z,size_z)%>%as.matrix()
+weight_mat=solve(t(iv_mat)%*%iv_mat)
+beta_guess=rep(0,num_X1+3)
+
+beta_guess=c(0,0,0)
+
+GMMM_fun<-function(betas,ns){
+ 
+  beta_u=betas[1:3]
+  #beta_lame=betas[-c(1:3)]
+  
+  options(dplyr.summarise.inform = FALSE)
+  if(dim(X2)[2]!=length(beta_u)){
+    print("beta_u must contain 3 parameters!")
+    invokeRestart("abort")
+  }
+  K=dim(X2)[2]
+  set.seed(123)
+  nu_mat=matrix( rnorm(ns*K,mean=0,sd=1), K, ns) 
+ 
+  mu_mat=matrix(0,nrow(X2),ns)
+  for(j in 1:ns){
+    for(i in 1:nrow(X2)){
+      mu_mat[i,j]<-sum(X2[i,]%*%t(nu_mat[,j])%*%beta_u)
+    }
+  }
+  
+  delta_jt=m_share_df$delta_jt%>%as.numeric()
+  
+  counter=0
+  err_tol=1e-6
+  current_error=1000
+ 
+  while(counter<1000 & current_error>err_tol){
+   
+    counter=counter+1
+    print(paste("Inner loop error: ",current_error))
+    top=mu_mat
+    for(i in 1:nrow(mu_mat)){
+      top[i,]<-delta_jt[i]+top[i,]
+    }
+    top_df=data.frame(ye=m_share_df$ye,co=m_share_df$co,top)
+    pred_share_df=top_df%>%gather(key="sim_number",value=v,-c(1,2))%>%
+      group_by(ye)%>%
+      mutate(bot=1+sum(exp(v)))%>%
+      ungroup()%>%
+      group_by(ye,co)%>%
+      summarise(pred_share=mean(exp(v)/bot))
+    pred_share_df=pred_share_df%>%inner_join(select(m_share_df,-c(mshare_0,delta_jt)),by=c("ye","co"))
+    pred_share_df$delta_jt=delta_jt%>%as.numeric()
+    pred_share_df=pred_share_df%>%mutate(delta_jt_1=delta_jt+log(mshare)-log(abs(pred_share)),
+                           error_term=abs(delta_jt_1-delta_jt))
+    current_error=max(pred_share_df$error_term)
+    delta_jt=pred_share_df$delta_jt_1%>%as.numeric()
+  }
+  browser()
+  delta=delta_jt%>%as.numeric()
+  
+  #GMM Time!
+  blin=solve(t(X1)%*%iv_mat%*%weight_mat%*%t(iv_mat)%*%X1)%*%(t(X1)%*%iv_mat%*%weight_mat%*%t(iv_mat)%*%delta)
+  error_term=delta-X1%*%blin
+  gmm_val=t(error_term)%*%iv_mat%*%weight_mat%*%t(iv_mat)%*%error_term
+  
+  
+}
+
+GMMM_fun(betas=beta_guess,ns=20)
+
+
+
+
+
+
+
+start_time <- Sys.time()
+blp_demand=nlm(p=beta_guess,ns=20,f=GMMM_fun,print.level = 2)
+end_time <- Sys.time()
+
+start_time-end_time
 
