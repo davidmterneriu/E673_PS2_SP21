@@ -601,9 +601,74 @@ GMMM_fun(betas=beta_guess,ns=20)
 
 start_time <- Sys.time()
 
-blp_demand=optim(par=beta_guess,ns=10,fn=GMMM_fun,control=list(trace=1))
+blp_demand=optim(par=beta_guess,ns=20,fn=GMMM_fun,control=list(trace=2))
 #blp_demand=nlm(p=beta_guess,ns=20,f=GMMM_fun,print.level = 2)
 end_time <- Sys.time()
 
-start_time-end_time
+end_time-start_time
+
+blp_demand_est=function(par,ns){
+  start_time <- Sys.time()
+  init_est=optim(par=par,ns=ns,fn=GMMM_fun,control=list(trace=2))
+  end_time <- Sys.time()
+  time_dif=end_time-start_time
+  beta_u=init_est$par
+  gmm_val=init_est$value
+  
+  K=dim(X2)[2]
+  set.seed(123)
+  nu_mat=matrix( rnorm(ns*K,mean=0,sd=1), K, ns) 
+  
+  
+  mu_mat=matrix(0,nrow(X2),ns)
+  for(j in 1:ns){
+    for(i in 1:nrow(X2)){
+      mu_mat[i,j]<-sum(X2[i,]%*%t(nu_mat[,j])%*%beta_u)
+    }
+  }
+  delta_jt=m_share_df$delta_jt%>%as.numeric()
+  
+  counter=0
+  err_tol=1e-6
+  current_error=1000
+  
+  while(counter<1000 & current_error>err_tol){
+    
+    counter=counter+1
+    # print(paste("Inner loop error: ",current_error))
+    top=mu_mat
+    for(i in 1:nrow(mu_mat)){
+      top[i,]<-delta_jt[i]+top[i,]
+    }
+    top_df=data.frame(ye=m_share_df$ye,co=m_share_df$co,top)
+    pred_share_df=top_df%>%gather(key="sim_number",value=v,-c(1,2))%>%
+      group_by(ye)%>%
+      mutate(bot=1+sum(exp(v)))%>%
+      ungroup()%>%
+      group_by(ye,co)%>%
+      summarise(pred_share=mean(exp(v)/bot))
+    pred_share_df=pred_share_df%>%inner_join(select(m_share_df,-c(mshare_0,delta_jt)),by=c("ye","co"))
+    pred_share_df$delta_jt=delta_jt%>%as.numeric()
+    pred_share_df=pred_share_df%>%mutate(delta_jt_1=delta_jt+log(mshare)-log(abs(pred_share)),
+                                         error_term=abs(delta_jt_1-delta_jt))
+    current_error=max(pred_share_df$error_term)
+    
+    if(is.nan(current_error)){
+      print("Problem with inner loop!")
+      invokeRestart("abort")
+    }
+    
+    delta_jt=pred_share_df$delta_jt_1%>%as.numeric()
+  }
+  delta=delta_jt%>%as.numeric()
+  
+  xi_model=lm(delta~0+X1)
+  names(beta_u)<-c("price","size","speed")
+  return_l=list(mean_coeff=xi_model,beta_u=beta_u,gmm_val=gmm_val,time=time_dif,mean_u=delta)
+  return(return_l)
+}
+
+demand_res=blp_demand_est(par=beta_guess,ns=10)
+
+summary(demand_res$mean_coeff)
 
