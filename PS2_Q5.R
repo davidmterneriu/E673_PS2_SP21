@@ -657,18 +657,23 @@ blp_demand_est=function(par,ns){
       print("Problem with inner loop!")
       invokeRestart("abort")
     }
-    
+    con_share=top_df%>%gather(key="sim_number",value=v,-c(1,2))%>%
+      group_by(ye)%>%
+      mutate(bot=1+sum(exp(v)))%>%
+      ungroup()%>%
+      mutate(i_est_share=exp(v)/bot)
     delta_jt=pred_share_df$delta_jt_1%>%as.numeric()
   }
   delta=delta_jt%>%as.numeric()
   
   xi_model=lm(delta~0+X1)
   names(beta_u)<-c("price","size","speed")
-  return_l=list(mean_coeff=xi_model,beta_u=beta_u,gmm_val=gmm_val,time=time_dif,mean_u=delta)
+  return_l=list(mean_coeff=xi_model,beta_u=beta_u,gmm_val=gmm_val,time=time_dif,mean_u=delta,
+                con_share=con_share)
   return(return_l)
 }
 
-demand_res=blp_demand_est(par=beta_guess,ns=10)
+demand_res=blp_demand_est(par=beta_guess,ns=20)
 
 summary(demand_res$mean_coeff)
 
