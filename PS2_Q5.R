@@ -494,6 +494,10 @@ m_share_df<-select(automobile,mshare,ye,co)%>%
 
 brd_dummy=automobile$brd%>%as.numeric()
 
+
+
+brd_dummy_df=stack(attr(automobile$brd, 'labels'))%>%as.data.frame()
+
 prod_dummy=fastDummies::dummy_cols(brd_dummy)
 prod_dummy=prod_dummy[,-1]%>%as.matrix()
 
@@ -675,5 +679,73 @@ blp_demand_est=function(par,ns){
 
 demand_res=blp_demand_est(par=beta_guess,ns=20)
 
-summary(demand_res$mean_coeff)
+summary(demand_res$beta_u)
+demand_res$beta_u%>%round(3)
+demand_res$gmm_val%>%round(3)
+demand_res$time%>%as.numeric()%>%round(3)
 
+brd_dummy_df$values=as.character(brd_dummy_df$values)
+brd_dummy_df$ind=as.character(brd_dummy_df$ind)
+
+gmm_model_print=demand_res$mean_coeff%>%broom::tidy()%>%
+  select(term,estimate)%>%
+  mutate(term=gsub("X1","",term),
+         term=gsub("\\.data_","",term))%>%
+  left_join(brd_dummy_df,by=c("term"="values"))%>%
+  mutate(term=ifelse(is.na(ind),term,ind))%>%
+  select(-ind)
+  
+kableExtra::kable(gmm_model_print,format = "latex",booktabs = T, linesep = "",digits = 3)
+
+
+
+
+demand_res$con_share%>%group_by(ye,sim_number)%>%
+  summarise(share=sum(i_est_share))%>%
+  ungroup()%>%
+  group_by(ye)%>%
+  summarise(tot=sum(share))
+
+ye_list=demand_res$con_share$ye%>%as.numeric()%>%unique()
+co_list=demand_res$con_share$co%>%as.numeric()%>%unique()
+
+rand_co_elas=expand.grid(co_1=co_list,
+                         co_2=co_list)%>%
+  as.data.frame()
+
+rand_co_elas$elastic=0
+
+demand_res_95=demand_res$con_share%>%filter(ye==95)
+
+
+ye_list=demand_res_95$ye%>%as.numeric()%>%unique()
+co_list=demand_res_95$co%>%as.numeric()%>%unique()
+
+rand_co_elas=expand.grid(co_1=co_list,
+                         co_2=co_list)%>%
+  as.data.frame()
+
+rand_co_elas$elas=0
+#Absolute value of mean-price coeff
+alpha_price=demand_res$mean_coeff$coefficients[1]%>%as.numeric()%>%abs()
+
+
+demand_res_95f=demand_res_95%>%inner_join(select(auto_95,ye,co,pr_s))
+
+for(i in 1:nrow(rand_co_elas)){
+  print(i/nrow(rand_co_elas))
+  if(rand_co_elas$co_1[i]==rand_co_elas$co_2[i]){
+    rand_co_elas$elas[i]=demand_res_95f%>%filter(co==rand_co_elas$co_1[i])%>%
+      summarise(in_share=unique(pr_s)*sum(i_est_share*(1-i_est_share)),
+                tot_share=sum(i_est_share))%>%
+      mutate(elas=-1*alpha_price/tot_share*in_share)%>%
+      select(elas)%>%as.numeric()
+  }else{
+    rand_co_elas$elas[i]=demand_res_95f%>%filter(co==rand_co_elas$co_1[i]|co==rand_co_elas$co_2[i])%>%
+      summarise(in_share=unique(pr_s[co==rand_co_elas$co_2[i]])*
+                  sum(i_est_share[co==rand_co_elas$co_1[i]]*i_est_share[co==rand_co_elas$co_2[i]]),
+                tot_share=sum(i_est_share[co==rand_co_elas$co_1[i]]))%>%
+      mutate(elas=alpha_price/tot_share*in_share)%>%
+      select(elas)%>%as.numeric()
+  }
+}
