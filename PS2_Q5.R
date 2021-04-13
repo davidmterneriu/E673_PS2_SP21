@@ -503,6 +503,7 @@ prod_dummy=prod_dummy[,-1]%>%as.matrix()
 
 
 X1=cbind(price=automobile$pr_s,hp_wt=automobile$hp_wt,prod_dummy)%>%as.matrix()
+X1_np=X1[,-1]
 
 num_X1=dim(X1)[2]
 
@@ -521,8 +522,12 @@ automobile=automobile%>%mutate(cons=1)
 
 
 #IV matrix: speed_z,hp_wt_z,size_z
-iv_mat<-automobile%>%select(speed_z,hp_wt_z,size_z)%>%as.matrix()
+iv_mat<-automobile%>%select(cons,speed_z,hp_wt_z,size_z)%>%as.matrix()
 weight_mat=solve(t(iv_mat)%*%iv_mat)
+
+first_stage=lm(data=automobile,pr_s~speed_z+hp_wt_z+size_z)
+fitted_price=fitted(first_stage)
+
 beta_guess=rep(0,num_X1+3)
 
 beta_guess=c(0,0,0)
@@ -551,7 +556,7 @@ GMMM_fun<-function(betas,ns){
   delta_jt=m_share_df$delta_jt%>%as.numeric()
   
   counter=0
-  err_tol=1e-6
+  err_tol=1e-7
   current_error=1000
  
   while(counter<1000 & current_error>err_tol){
@@ -584,8 +589,10 @@ GMMM_fun<-function(betas,ns){
   }
   #browser()
   delta=delta_jt%>%as.numeric()
-  
+  automobile_t=automobile%>%mutate(delta_est=delta)
   xi_model=lm(delta~0+X1)
+  #xi_model=ivreg(data=automobile_t,delta_est~0+pr_s+hp_wt+as.factor(brd)|
+  #                 hp_wt+as.factor(brd)+hp_wt_z+speed_z+size_z)
   xi=resid(xi_model)
   
   #GMM Time!
@@ -595,7 +602,7 @@ GMMM_fun<-function(betas,ns){
   return(gmm_val)
 }
 
-GMMM_fun(betas=beta_guess,ns=20)
+#GMMM_fun(betas=beta_guess,ns=20)
 
 
 
@@ -603,13 +610,13 @@ GMMM_fun(betas=beta_guess,ns=20)
 
 
 
-start_time <- Sys.time()
 
-blp_demand=optim(par=beta_guess,ns=20,fn=GMMM_fun,control=list(trace=2))
+
+#blp_demand=optim(par=beta_guess,ns=20,fn=GMMM_fun,control=list(trace=2))
 #blp_demand=nlm(p=beta_guess,ns=20,f=GMMM_fun,print.level = 2)
-end_time <- Sys.time()
 
-end_time-start_time
+
+#end_time-start_time
 
 blp_demand_est=function(par,ns){
   start_time <- Sys.time()
@@ -749,3 +756,20 @@ for(i in 1:nrow(rand_co_elas)){
       select(elas)%>%as.numeric()
   }
 }
+
+elastic_df2=expand.grid(j=auto_95f$type,k=auto_95f$type)%>%as.data.frame()
+
+
+
+elastic_df2=elastic_df2%>%inner_join(select(auto_95,j=type,co_1=co,pr_j=pr_s))%>%
+  inner_join(select(auto_95,k=type,co_2=co,pr_k=pr))%>%
+  inner_join(rand_co_elas)
+
+
+ggplot(elastic_df2, aes(x=reorder(j,pr_j), y=reorder(k,pr_k))) +
+  geom_tile(aes(fill = elas), colour = "grey50")+
+  geom_label(aes(label=round(elas,4)))+
+  labs(x="",y="",fill="Elasticity",title="Random Coefficients Elasticities")+
+  ggthemes::theme_clean()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
