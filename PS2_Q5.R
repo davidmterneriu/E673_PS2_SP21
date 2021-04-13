@@ -484,7 +484,7 @@ automobile=automobile%>%mutate(mshare=qu/pop)
 
 m_share_df<-select(automobile,mshare,ye,co)%>%
   group_by(ye)%>%
-  mutate(mshare_0=sum(mshare)-mshare)%>%
+  mutate(mshare_0=1-sum(mshare))%>%
   ungroup()%>%
   mutate(delta_jt=log(mshare)-log(mshare_0))
 
@@ -543,7 +543,7 @@ GMMM_fun<-function(betas,ns){
     invokeRestart("abort")
   }
   K=dim(X2)[2]
-  set.seed(123)
+  set.seed(1234)
   nu_mat=matrix( rnorm(ns*K,mean=0,sd=1), K, ns) 
  
   mu_mat=matrix(0,nrow(X2),ns)
@@ -590,9 +590,9 @@ GMMM_fun<-function(betas,ns){
   #browser()
   delta=delta_jt%>%as.numeric()
   automobile_t=automobile%>%mutate(delta_est=delta)
-  xi_model=lm(delta~0+X1)
-  #xi_model=ivreg(data=automobile_t,delta_est~0+pr_s+hp_wt+as.factor(brd)|
-  #                 hp_wt+as.factor(brd)+hp_wt_z+speed_z+size_z)
+  #xi_model=lm(delta~0+X1)
+  xi_model=ivreg(data=automobile_t,delta_est~0+pr_s+hp_wt+as.factor(brd)|
+                   hp_wt+as.factor(brd)+hp_wt_z+speed_z+size_z)
   xi=resid(xi_model)
   
   #GMM Time!
@@ -622,12 +622,13 @@ blp_demand_est=function(par,ns){
   start_time <- Sys.time()
   init_est=optim(par=par,ns=ns,fn=GMMM_fun,control=list(trace=2))
   end_time <- Sys.time()
+  #browser()
   time_dif=end_time-start_time
   beta_u=init_est$par
   gmm_val=init_est$value
   
   K=dim(X2)[2]
-  set.seed(123)
+  set.seed(1234)
   nu_mat=matrix( rnorm(ns*K,mean=0,sd=1), K, ns) 
   
   
@@ -676,9 +677,13 @@ blp_demand_est=function(par,ns){
     delta_jt=pred_share_df$delta_jt_1%>%as.numeric()
   }
   delta=delta_jt%>%as.numeric()
+  automobile_t=automobile%>%mutate(delta_est=delta)
+  #xi_model=lm(delta~0+X1)
+  xi_model=ivreg(data=automobile_t,delta_est~0+pr_s+hp_wt+as.factor(brd)|
+                   hp_wt+as.factor(brd)+hp_wt_z+speed_z+size_z)
   
-  xi_model=lm(delta~0+X1)
   names(beta_u)<-c("price","size","speed")
+  
   return_l=list(mean_coeff=xi_model,beta_u=beta_u,gmm_val=gmm_val,time=time_dif,mean_u=delta,
                 con_share=con_share)
   return(return_l)
@@ -686,7 +691,12 @@ blp_demand_est=function(par,ns){
 
 demand_res=blp_demand_est(par=beta_guess,ns=20)
 
-summary(demand_res$beta_u)
+demand_res$beta_u[1]
+
+demand_res$mean_coeff$coefficients[1]+demand_res$beta_u[1]
+
+
+demand_res$beta_u%>%round(5)
 demand_res$beta_u%>%round(3)
 demand_res$gmm_val%>%round(3)
 demand_res$time%>%as.numeric()%>%round(3)
@@ -696,8 +706,7 @@ brd_dummy_df$ind=as.character(brd_dummy_df$ind)
 
 gmm_model_print=demand_res$mean_coeff%>%broom::tidy()%>%
   select(term,estimate)%>%
-  mutate(term=gsub("X1","",term),
-         term=gsub("\\.data_","",term))%>%
+  mutate(term=gsub("as.factor\\(brd\\)","",term))%>%
   left_join(brd_dummy_df,by=c("term"="values"))%>%
   mutate(term=ifelse(is.na(ind),term,ind))%>%
   select(-ind)
@@ -734,35 +743,41 @@ rand_co_elas=expand.grid(co_1=co_list,
 
 rand_co_elas$elas=0
 #Absolute value of mean-price coeff
-alpha_price=demand_res$mean_coeff$coefficients[1]%>%as.numeric()%>%abs()
+alpha_price=demand_res$mean_coeff$coefficients[1]%>%as.numeric()
 
 
-demand_res_95f=demand_res_95%>%inner_join(select(auto_95,ye,co,pr_s))
+demand_res_95f=demand_res_95%>%inner_join(select(auto_95,co,pr_s))
 
-for(i in 1:nrow(rand_co_elas)){
-  print(i/nrow(rand_co_elas))
-  if(rand_co_elas$co_1[i]==rand_co_elas$co_2[i]){
-    rand_co_elas$elas[i]=demand_res_95f%>%filter(co==rand_co_elas$co_1[i])%>%
-      summarise(in_share=unique(pr_s)*sum(i_est_share*(1-i_est_share)),
-                tot_share=sum(i_est_share))%>%
-      mutate(elas=-1*alpha_price/tot_share*in_share)%>%
-      select(elas)%>%as.numeric()
-  }else{
-    rand_co_elas$elas[i]=demand_res_95f%>%filter(co==rand_co_elas$co_1[i]|co==rand_co_elas$co_2[i])%>%
-      summarise(in_share=unique(pr_s[co==rand_co_elas$co_2[i]])*
-                  sum(i_est_share[co==rand_co_elas$co_1[i]]*i_est_share[co==rand_co_elas$co_2[i]]),
-                tot_share=sum(i_est_share[co==rand_co_elas$co_1[i]]))%>%
-      mutate(elas=alpha_price/tot_share*in_share)%>%
-      select(elas)%>%as.numeric()
-  }
-}
+p1_list=demand_res_95f$co%>%unique()
+
+master_elas=expand.grid(j=p1_list,k=p1_list)%>%as.data.frame()
+
+master_elas=master_elas%>%inner_join(select(demand_res_95f,sim_number,j=co,est_share_ij=i_est_share,pr_j=pr_s))%>%
+  inner_join(select(demand_res_95f,sim_number,k=co,est_share_ik=i_est_share,pr_k=pr_s))
+
+master_elas=master_elas%>%mutate(elas_type=ifelse(j==k,"own","cross"))
+
+master_elas%>%filter(elas_type=="own")%>%
+  group_by(j)%>%
+  summarise(intregal=sum(est_share_ij*(1-est_share_ij)),
+            tot_share=sum(est_share_ij))%>%
+  ungroup()%>%
+  mutate(elas=intregal/tot_share)
+
+master_elas%>%filter(elas_type=="own")%>%
+  mutate(inside=est_share_ij*(1-est_share_ij))%>%
+  group_by(j)%>%
+  summarise(intg_p=unique(pr_j)*sum(inside),
+            tot=sum(est_share_ij))%>%
+  mutate(elas=alpha_price*intg_p/tot)
+  
 
 elastic_df2=expand.grid(j=auto_95f$type,k=auto_95f$type)%>%as.data.frame()
 
 
 
-elastic_df2=elastic_df2%>%inner_join(select(auto_95,j=type,co_1=co,pr_j=pr_s))%>%
-  inner_join(select(auto_95,k=type,co_2=co,pr_k=pr))%>%
+elastic_df2=elastic_df2%>%inner_join(select(auto_95,j=type,co_1=co,pr_j=pr_s,firm_j=frm))%>%
+  inner_join(select(auto_95,k=type,co_2=co,pr_k=pr,firm_k=frm))%>%
   inner_join(rand_co_elas)
 
 
@@ -773,3 +788,145 @@ ggplot(elastic_df2, aes(x=reorder(j,pr_j), y=reorder(k,pr_k))) +
   ggthemes::theme_clean()+
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
+elastic_df3=expand.grid(j=auto_95$type,k=auto_95$type)%>%as.data.frame()
+
+
+
+elastic_df3=elastic_df3%>%inner_join(select(auto_95,j=type,co_1=co,pr_j=pr_s,firm_j=frm,ms_1=ms))%>%
+  inner_join(select(auto_95,k=type,co_2=co,pr_k=pr,firm_k=frm,ms_2=ms))%>%
+  inner_join(rand_co_elas)
+
+elastic_df3=elastic_df3%>%mutate(delta_jr_mat=ifelse(firm_j==firm_k,-1*elas*ms_1/pr_k,0))
+
+
+delta_jr_blp_mat=elastic_df3%>%select(j,k,delta_jr_mat)%>%
+  pivot_wider(names_from = j, values_from = delta_jr_mat)%>%
+  select(-k)%>%
+  as.matrix()
+
+
+sp_df<-elastic_df3%>%select(j,firm_j,ms_1,pr_j)%>%unique.data.frame()
+
+
+sp_df$markup_iv=solve(delta_jr_blp_mat)%*%sp_df$ms_1
+
+sp_df=sp_df%>%inner_join(select(auto_95,j=type,firm_j=frm,hp_wt,size,sp))
+
+
+
+mc_blp_15=sp_df$pr_j*(1-sp_df$markup_iv%>%as.numeric()/100)
+
+sp_df_super=rbind(sp_df%>%select(j,markup_iv,pr_j,hp_wt,size,sp)%>%top_n(markup_iv,n=5),
+                  sp_df%>%select(j,markup_iv,pr_j,hp_wt,size,sp)%>%top_n(-markup_iv,n=5))%>%arrange(-markup_iv)
+
+sp_df_super$markup_iv=sp_df_super$markup_iv%>%as.numeric()
+
+kable(sp_df_super,format = "latex",digits = 2,booktabs = T, linesep = "")
+
+
+
+
+
+###########################################################################################
+# (2.1) Logit Model w/ correct market share definition 
+###########################################################################################
+
+automobile=automobile%>%mutate(ms=qu/pop)%>%
+  group_by(ye,cla)%>%
+  mutate(ms_nest=ms/sum(ms))%>%
+  ungroup()%>%
+  group_by(ye)%>%
+  mutate(outside_s=1-sum(ms))%>%
+  ungroup()%>%
+  mutate(delta_init=log(ms)-log(outside_s))
+
+
+
+bas_model_1=lm(data=automobile,delta_init~hp_wt+size+sp+pr_s)
+nest_model_1=lm(data=automobile,delta_init~hp_wt+size+sp+pr_s+log(ms_nest))
+
+iv_mod1=ivreg(data=automobile,delta_init~hp_wt+size+sp+pr_s
+              |hp_wt+size+sp+hp_wt_z+size_z+speed_z)
+iv_mod2=ivreg(data=automobile,delta_init~hp_wt+size+sp+pr_s+log(cla_share)
+              |hp_wt+size+sp+hp_wt_z+size_z+speed_z)
+
+
+stargazer(bas_model_1,nest_model_1,iv_mod1,iv_mod2,digits = 3)
+
+
+
+
+base_elas=expand.grid(co_1=co_list,
+                         co_2=co_list)%>%
+  as.data.frame()
+
+base_elas$elas=0
+
+alpha_price_base=bas_model_1$coefficients[names(bas_model_1$coefficients)=="pr_s"]%>%as.numeric()
+alpha_price_iv=iv_mod1$coefficients[names(bas_model_1$coefficients)=="pr_s"]%>%as.numeric()
+
+
+
+auto_95=filter(automobile,ye==95)
+
+base_elas=base_elas%>%inner_join(select(auto_95,co_1=co,pr_1=pr_s,ms_1=ms))%>%
+  inner_join(select(auto_95,co_2=co,pr_2=pr_s,ms_2=ms))%>%
+  mutate(base_elas=ifelse(co_1==co_2,alpha_price_base*pr_1*(1-ms_1),
+                          -alpha_price_base*pr_2*ms_2),
+         iv_elas=ifelse(co_1==co_2,alpha_price_iv*pr_1*(1-ms_1),
+                        -alpha_price_iv*pr_2*ms_2))
+                         
+
+
+elastic_df2=expand.grid(j=auto_95$type,k=auto_95$type)%>%as.data.frame()
+
+elastic_df2=elastic_df2%>%inner_join(select(auto_95,j=type,pr_j=pr_s,ms_1=ms,frm_j=frm,co_1=co))%>%
+  inner_join(select(auto_95,k=type,pr_k=pr_s,ms_2=ms,frm_k=frm,co_2=co))%>%
+  mutate(case_n=ifelse(j==k,"C1",ifelse("cla_j"=="cla_k","C2","C3")))
+
+
+
+
+
+
+elastic_df2=elastic_df2%>%inner_join(select(base_elas,co_1,co_2,base_elas,iv_elas))
+elastic_df2=elastic_df2%>%mutate(delta_jr_mat=ifelse(frm_j==frm_k,-1*iv_elas*ms_1/pr_k,0))
+
+
+delta_jr_iv_mat=elastic_df2%>%select(j,k,delta_jr_mat)%>%
+  pivot_wider(names_from = j, values_from = delta_jr_mat)%>%
+  select(-k)%>%
+  as.matrix()
+
+
+sp_df<-elastic_df2%>%select(j,frm_j,ms_1,pr_j)%>%unique.data.frame()
+
+
+sp_df$markup_iv=solve(delta_jr_iv_mat)%*%sp_df$ms_1/sp_df$pr_j*100
+
+sp_df=sp_df%>%inner_join(select(auto_95,j=type,frm_j=frm,hp_wt,size,sp))
+
+
+
+mc_base_15=sp_df$pr_j*(1-sp_df$markup_iv%>%as.numeric()/100)
+
+sp_df_super=rbind(sp_df%>%select(j,markup_iv,pr_j,hp_wt,size,sp)%>%top_n(markup_iv,n=5),
+                  sp_df%>%select(j,markup_iv,pr_j,hp_wt,size,sp)%>%top_n(-markup_iv,n=5))%>%arrange(-markup_iv)
+
+sp_df_super$markup_iv=sp_df_super$markup_iv%>%as.numeric()
+
+kable(sp_df_super,format = "latex",digits = 2,booktabs = T, linesep = "")
+
+
+elastic_df2%>%ggplot(aes(x=-1*base_elas,y=iv_elas))+
+  geom_point()
+
+
+elastic_df2%>%filter(j %in% auto_95f$type & k %in% auto_95f$type)%>%
+  gather(key="model",value="elas",c("iv_elas","base_elas"))%>%ggplot(aes(x=reorder(j,pr_j), y=reorder(k,pr_k))) +
+  geom_tile(aes(fill = elas), colour = "grey50")+
+  geom_label(aes(label=round(elas,4)))+
+  labs(x="",y="",fill="Elasticity",title="Logit Own/Cross Price Elasticity ")+
+  ggthemes::theme_clean()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  facet_wrap(~model)
