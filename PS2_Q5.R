@@ -682,14 +682,22 @@ blp_demand_est=function(par,ns){
   xi_model=ivreg(data=automobile_t,delta_est~0+pr_s+hp_wt+as.factor(brd)|
                    hp_wt+as.factor(brd)+hp_wt_z+speed_z+size_z)
   
+  xi=resid(xi_model)
+  
   names(beta_u)<-c("price","size","speed")
   
+ 
+  rand_df=data.frame(sim_number=paste("X",seq(1,ns,by=1),sep=""),
+                           alpha_i=nu_mat[1,]*beta_u[1]+xi_model$coefficients[1],
+                     size_i=nu_mat[2,]*beta_u[2],
+                     speed_i=nu_mat[3,]*beta_u[3])
+  
   return_l=list(mean_coeff=xi_model,beta_u=beta_u,gmm_val=gmm_val,time=time_dif,mean_u=delta,
-                con_share=con_share)
+                con_share=con_share,consumer_betas=rand_df,xi=xi)
   return(return_l)
 }
 
-demand_res=blp_demand_est(par=beta_guess,ns=20)
+demand_res=blp_demand_est(par=beta_guess,ns=10)
 
 demand_res$beta_u[1]
 
@@ -742,43 +750,147 @@ rand_co_elas=expand.grid(co_1=co_list,
   as.data.frame()
 
 rand_co_elas$elas=0
-#Absolute value of mean-price coeff
+###############################################################################
+#Trying new definition of elasticity (04/14/21)
+###############################################################################
+
+
+
+#See: https://journals.sagepub.com/doi/pdf/10.1177/1536867X1501500317
 alpha_price=demand_res$mean_coeff$coefficients[1]%>%as.numeric()
 
+hp_coef=demand_res$mean_coeff$coefficients[2]
+
+
+rand_bits=demand_res$consumer_betas
+
+
+automobile_test=automobile
+automobile_test$mean_u=demand_res$mean_u
+
+
+automobile_test=automobile_test%>%filter(ye==95)
+
+p1_list=demand_res_95f$co%>%unique()
+master_elas1=expand.grid(j=p1_list,sim_number=paste("X",seq(1,10,by=1),sep=""))%>%as.data.frame()
+
+master_elas1%>%inner_join(select(automobile_test,j=co,ms_j=ms,mean_u,pr_s,size,sp,hp_wt))%>%
+  inner_join(rand_bits)%>%
+  mutate(top_est=pr_s*alpha_i+size*size_i+sp*speed_i+demand_res$xi)%>%
+  group_by(j)%>%
+  mutate(bot=1+sum(exp(top_est)),
+         share_ij=exp(top_est)/bot,
+         share_2=sum(share_ij/bot),
+         inner_share=alpha_i*share_ij*(1-share_ij))%>%
+  summarise(elas=unique(pr_s)/share_2*sum(inner_share))%>%
+  unique.data.frame()%>%View()
+
+real_blp_elastic=master_elas1%>%inner_join(select(automobile_test,j=co,ms_j=ms,mean_u,pr_s,size,sp,hp_wt))%>%
+  inner_join(rand_bits)%>%
+  mutate(top_est=pr_s*alpha_i+size*size_i+sp*speed_i+demand_res$xi)%>%
+  group_by(j)%>%
+  mutate(bot=1+sum(exp(top_est)),
+         share_ij=exp(top_est)/bot,
+         share_2=sum(share_ij/bot))%>%
+  ungroup()
+
+
+p1_list=demand_res_95f$co%>%unique()
+master_elas=expand.grid(j=p1_list,k=p1_list)%>%as.data.frame()
+
+
+master_elas=master_elas%>%
+  inner_join(select(real_blp_elastic,sim_number,alpha_i,pr_j=pr_s,j,ms_j,share_ij,share_j=share_2))%>%
+  inner_join(select(real_blp_elastic,sim_number,pr_k=pr_s,j,ms_k=ms_j,share_ik=share_ij,share_k=share_2))%>%
+  mutate(type=ifelse(j==k,"own","cross"))
+
+
+master_elas%>%filter(type=="own")%>%
+  group_by(j)%>%
+  summarise(elas=unique(pr_j)/share_j*sum(alpha_i*share_ij*(1-share_ij)))%>%
+  unique.data.frame()
+
+
+master_elas%>%filter(type!="own")%>%
+  group_by(j,k)%>%
+  summarise(elas=-unique(pr_k)/share_j*sum(alpha_i*share_ij*share_ik))%>%
+  unique.data.frame()%>%View()
+
+###############################################################################
 
 demand_res_95f=demand_res_95%>%inner_join(select(auto_95,co,pr_s))
+demand_res_95f=demand_res_95f%>%inner_join(demand_res$consumer_betas)
+
 
 p1_list=demand_res_95f$co%>%unique()
 
 master_elas=expand.grid(j=p1_list,k=p1_list)%>%as.data.frame()
 
-master_elas=master_elas%>%inner_join(select(demand_res_95f,sim_number,j=co,est_share_ij=i_est_share,pr_j=pr_s))%>%
+master_elas=master_elas%>%inner_join(select(demand_res_95f,sim_number,j=co,est_share_ij=i_est_share,pr_j=pr_s,alpha_i))%>%
   inner_join(select(demand_res_95f,sim_number,k=co,est_share_ik=i_est_share,pr_k=pr_s))
 
 master_elas=master_elas%>%mutate(elas_type=ifelse(j==k,"own","cross"))
 
-master_elas%>%filter(elas_type=="own")%>%
+own_price_rando=master_elas%>%filter(elas_type=="own")%>%
   group_by(j)%>%
-  summarise(intregal=sum(est_share_ij*(1-est_share_ij)),
+  summarise(intregal=unique(pr_j)*sum(alpha_i*est_share_ij*(1-est_share_ij)),
             tot_share=sum(est_share_ij))%>%
   ungroup()%>%
-  mutate(elas=intregal/tot_share)
+  mutate(elas=intregal/tot_share)%>%
+  select(j=j,k=j,elas)
 
-master_elas%>%filter(elas_type=="own")%>%
-  mutate(inside=est_share_ij*(1-est_share_ij))%>%
-  group_by(j)%>%
-  summarise(intg_p=unique(pr_j)*sum(inside),
+cross_price_rando=master_elas%>%filter(elas_type!="own")%>%
+  mutate(inside=alpha_i*est_share_ij*est_share_ik)%>%
+  group_by(j,k)%>%
+  summarise(intg_p=unique(pr_k)*sum(inside),
             tot=sum(est_share_ij))%>%
-  mutate(elas=alpha_price*intg_p/tot)
+  mutate(elas=-intg_p/tot)%>%
+  select(j=j,k=k,elas)
+
+rando_all_elastic=rbind(own_price_rando,cross_price_rando)
+
+
+auto_95=auto_95%>%mutate(ms=qu/pop)
+
+elastic_df2_all=expand.grid(j=auto_95$type%>%unique(),k=auto_95$type%>%unique())%>%as.data.frame()
+
+elastic_df2_all=elastic_df2_all%>%inner_join(select(auto_95,j=type,co_1=co,pr_j=pr_s,firm_j=frm,loc_j=loc,ms_j=ms))%>%
+  inner_join(select(auto_95,k=type,co_2=co,pr_k=pr_s,firm_k=frm,loc_k=loc,ms_k=ms))%>%
+  inner_join(rando_all_elastic,by=c("co_1"="j","co_2"="k"))
+
+
+elastic_df2_all=elastic_df2_all%>%mutate(delta_jr_mat=ifelse(firm_j==firm_k,-1*elas*ms_j/pr_j,0))
+delta_jr_blp_mat=elastic_df2_all%>%select(j,k,delta_jr_mat)%>%
+  pivot_wider(names_from = j, values_from = delta_jr_mat)%>%
+  select(-k)%>%
+  as.matrix()
+
+sp_df<-elastic_df2_all%>%select(j,firm_j,ms_j,pr_j)%>%unique.data.frame()
+
+
+sp_df$markup_iv=solve(delta_jr_blp_mat)%*%sp_df$ms_j
+sp_df$marginal_cost=(sp_df$pr_j-sp_df$markup_iv%>%as.numeric())
+blp_mc=select(sp_df,j,firm_j,marginal_cost)
+
+sp_df=sp_df%>%inner_join(select(auto_95,j=type,firm_j=frm,hp_wt,size,sp))
+
+
+sp_df_blp=sp_df%>%mutate(lerner=markup_iv%>%as.numeric()/pr_j*100)
+
+sp_df_super=rbind(sp_df_blp%>%select(j,lerner,pr_j,hp_wt,size,sp)%>%top_n(lerner,n=5),
+                  sp_df_blp%>%select(j,lerner,pr_j,hp_wt,size,sp)%>%top_n(-lerner,n=5))%>%arrange(-lerner)
+
+kable(sp_df_super,format = "latex",digits = 2,booktabs = T, linesep = "")
   
 
 elastic_df2=expand.grid(j=auto_95f$type,k=auto_95f$type)%>%as.data.frame()
 
 
 
+
 elastic_df2=elastic_df2%>%inner_join(select(auto_95,j=type,co_1=co,pr_j=pr_s,firm_j=frm))%>%
-  inner_join(select(auto_95,k=type,co_2=co,pr_k=pr,firm_k=frm))%>%
-  inner_join(rand_co_elas)
+  inner_join(select(auto_95,k=type,co_2=co,pr_k=pr_s,firm_k=frm))%>%
+  inner_join(rando_all_elastic,by=c("co_1"="j","co_2"="k"))
 
 
 ggplot(elastic_df2, aes(x=reorder(j,pr_j), y=reorder(k,pr_k))) +
@@ -787,43 +899,6 @@ ggplot(elastic_df2, aes(x=reorder(j,pr_j), y=reorder(k,pr_k))) +
   labs(x="",y="",fill="Elasticity",title="Random Coefficients Elasticities")+
   ggthemes::theme_clean()+
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-
-elastic_df3=expand.grid(j=auto_95$type,k=auto_95$type)%>%as.data.frame()
-
-
-
-elastic_df3=elastic_df3%>%inner_join(select(auto_95,j=type,co_1=co,pr_j=pr_s,firm_j=frm,ms_1=ms))%>%
-  inner_join(select(auto_95,k=type,co_2=co,pr_k=pr,firm_k=frm,ms_2=ms))%>%
-  inner_join(rand_co_elas)
-
-elastic_df3=elastic_df3%>%mutate(delta_jr_mat=ifelse(firm_j==firm_k,-1*elas*ms_1/pr_k,0))
-
-
-delta_jr_blp_mat=elastic_df3%>%select(j,k,delta_jr_mat)%>%
-  pivot_wider(names_from = j, values_from = delta_jr_mat)%>%
-  select(-k)%>%
-  as.matrix()
-
-
-sp_df<-elastic_df3%>%select(j,firm_j,ms_1,pr_j)%>%unique.data.frame()
-
-
-sp_df$markup_iv=solve(delta_jr_blp_mat)%*%sp_df$ms_1
-
-sp_df=sp_df%>%inner_join(select(auto_95,j=type,firm_j=frm,hp_wt,size,sp))
-
-
-
-mc_blp_15=sp_df$pr_j*(1-sp_df$markup_iv%>%as.numeric()/100)
-
-sp_df_super=rbind(sp_df%>%select(j,markup_iv,pr_j,hp_wt,size,sp)%>%top_n(markup_iv,n=5),
-                  sp_df%>%select(j,markup_iv,pr_j,hp_wt,size,sp)%>%top_n(-markup_iv,n=5))%>%arrange(-markup_iv)
-
-sp_df_super$markup_iv=sp_df_super$markup_iv%>%as.numeric()
-
-kable(sp_df_super,format = "latex",digits = 2,booktabs = T, linesep = "")
-
-
 
 
 
@@ -930,3 +1005,61 @@ elastic_df2%>%filter(j %in% auto_95f$type & k %in% auto_95f$type)%>%
   ggthemes::theme_clean()+
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
   facet_wrap(~model)
+
+
+###########################################################################################
+# (4) Comparison 
+###########################################################################################
+
+
+iv_elastic=elastic_df2%>%select(j=co_1,k=co_2,elas=iv_elas)
+iv_elastic$model="logit_iv"
+
+blp_elastic=elastic_df2_all%>%select(j=co_1,k=co_2,elas)
+blp_elastic$model="blp"
+
+
+all_elastic_df=rbind(iv_elastic,blp_elastic)
+
+
+all_elastic_df%>%spread(key=model,value=elas)%>%
+  mutate(type=ifelse(j==k,"Own price", "Cross price"),
+         ratio=blp/logit_iv)%>%
+  ggplot(aes(x=type,fill=type,y=ratio))+
+  geom_boxplot()+
+  facet_wrap(~type,scales = "free")+
+  labs(x="",y="BLP/Logit (IV) Ratio",
+       title="BLP vs Logit (IV) Elasticities")+
+  ggthemes::theme_clean()+
+  theme(legend.position = "none")
+
+
+
+all_elastic_df_table=all_elastic_df%>%spread(key=model,value=elas)%>%
+  mutate(type=ifelse(j==k,"Own price", "Cross price"),
+         ratio=100*blp/logit_iv)%>%
+  group_by(type)%>%
+  summarise(min=min(ratio),
+            q25=quantile(ratio,0.25),
+            median=median(ratio),
+            mean=mean(ratio),
+            q75=quantile(ratio,0.75),
+            max=max(ratio))
+
+
+kable(all_elastic_df_table,format = "latex",digits = 4,booktabs = T, linesep = "")
+
+
+###########################################################################################
+# (6) Merger work 
+###########################################################################################
+
+
+
+
+
+
+
+
+
+
