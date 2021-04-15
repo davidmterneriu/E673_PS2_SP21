@@ -846,6 +846,32 @@ blp_elastic%>%filter(type_j %in% auto_95_list&type_k %in% auto_95_list)%>%
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
 
+blp_elastic=blp_elastic%>%mutate(delta_jr_mat=ifelse(frm_j==frm_k,-1*elas*ms_j/pr_j,0))
+delta_jr_blp_mat=blp_elastic%>%select(j,k,delta_jr_mat)%>%
+  pivot_wider(names_from = j, values_from = delta_jr_mat)%>%
+  select(-k)%>%
+  as.matrix()
+
+sp_df<-blp_elastic%>%select(j,frm_j,ms_j,pr_j)%>%unique.data.frame()
+
+
+sp_df$markup_iv=solve(delta_jr_blp_mat)%*%sp_df$ms_j%>%as.numeric()
+sp_df$marginal_cost=sp_df$pr_j-solve(delta_jr_blp_mat)%*%sp_df$ms_j%>%as.numeric()
+sp_df$lerner=sp_df$markup_iv/sp_df$pr_j*100
+
+sp_df=sp_df%>%inner_join(select(auto_95,j=co,type,size,hp_wt,size,sp))%>%ungroup()
+
+blp_mc=select(sp_df,j=type,frm_j,marginal_cost,markup_iv)
+
+sp_df_super=rbind(sp_df%>%select(type,lerner,pr_j,hp_wt,size,sp)%>%top_n(lerner,n=5),
+                  sp_df%>%select(type,lerner,pr_j,hp_wt,size,sp)%>%top_n(-lerner,n=5))%>%arrange(-lerner)
+
+
+kable(sp_df_super,format = "latex",digits = 2,booktabs = T, linesep = "")
+
+blp_elastic_sum=blp_elastic%>%select(j,k,elas)%>%
+  mutate(model="blp")
+
 
 ###############################################################################
 
@@ -902,9 +928,11 @@ sp_df<-elastic_df2_all%>%select(j,firm_j,ms_j,pr_j)%>%unique.data.frame()
 
 sp_df$markup_iv=solve(delta_jr_blp_mat)%*%sp_df$ms_j
 sp_df$marginal_cost=(sp_df$pr_j-sp_df$markup_iv%>%as.numeric())
-blp_mc=select(sp_df,j,firm_j,marginal_cost)
+
 
 sp_df=sp_df%>%inner_join(select(auto_95,j=type,firm_j=frm,hp_wt,size,sp))
+
+#blp_mc=select(sp_df,j=type,firm_j,marginal_cost)
 
 
 sp_df_blp=sp_df%>%mutate(lerner=markup_iv%>%as.numeric()/pr_j*100)
@@ -958,6 +986,8 @@ iv_mod2=ivreg(data=automobile,delta_init~hp_wt+size+sp+pr_s+log(cla_share)
               |hp_wt+size+sp+hp_wt_z+size_z+speed_z)
 
 
+
+
 stargazer(bas_model_1,nest_model_1,iv_mod1,iv_mod2,digits = 3)
 
 
@@ -972,6 +1002,11 @@ base_elas$elas=0
 alpha_price_base=bas_model_1$coefficients[names(bas_model_1$coefficients)=="pr_s"]%>%as.numeric()
 alpha_price_iv=iv_mod1$coefficients[names(bas_model_1$coefficients)=="pr_s"]%>%as.numeric()
 
+
+cv_iv_df=automobile%>%mutate(xi_iv=resid(iv_mod1),
+                    x_betas=delta_init-xi_iv-alpha_price_iv*pr_s)%>%
+  filter(ye==95)%>%
+  select(co,x_betas,xi_iv)
 
 
 auto_95=filter(automobile,ye==95)
@@ -1012,7 +1047,7 @@ sp_df<-elastic_df2%>%select(j,frm_j,ms_1,pr_j)%>%unique.data.frame()
 sp_df$markup_iv=solve(delta_jr_iv_mat)%*%sp_df$ms_1/sp_df$pr_j*100
 
 sp_df=sp_df%>%inner_join(select(auto_95,j=type,frm_j=frm,hp_wt,size,sp))
-
+sp_df_log=sp_df
 
 
 mc_base_15=sp_df$pr_j*(1-sp_df$markup_iv%>%as.numeric()/100)
@@ -1047,11 +1082,10 @@ elastic_df2%>%filter(j %in% auto_95f$type & k %in% auto_95f$type)%>%
 iv_elastic=elastic_df2%>%select(j=co_1,k=co_2,elas=iv_elas)
 iv_elastic$model="logit_iv"
 
-blp_elastic=elastic_df2_all%>%select(j=co_1,k=co_2,elas)
-blp_elastic$model="blp"
 
 
-all_elastic_df=rbind(iv_elastic,blp_elastic)
+
+all_elastic_df=rbind(iv_elastic,blp_elastic_sum)
 
 
 all_elastic_df%>%spread(key=model,value=elas)%>%
@@ -1069,7 +1103,7 @@ all_elastic_df%>%spread(key=model,value=elas)%>%
 
 all_elastic_df_table=all_elastic_df%>%spread(key=model,value=elas)%>%
   mutate(type=ifelse(j==k,"Own price", "Cross price"),
-         ratio=100*blp/logit_iv)%>%
+         ratio=blp/logit_iv)%>%
   group_by(type)%>%
   summarise(min=min(ratio),
             q25=quantile(ratio,0.25),
@@ -1079,7 +1113,36 @@ all_elastic_df_table=all_elastic_df%>%spread(key=model,value=elas)%>%
             max=max(ratio))
 
 
-kable(all_elastic_df_table,format = "latex",digits = 4,booktabs = T, linesep = "")
+kable(all_elastic_df_table,format = "latex",digits = 2,booktabs = T, linesep = "")
+
+
+
+
+price_comp=data.frame(sim_number=demand_res$consumer_betas[,1],blp_price=demand_res$consumer_betas[,2]+alpha_price,
+                      logit_price=alpha_price_iv)
+price_comp=price_comp%>%mutate(ratio=blp_price/logit_price)
+
+ggplot(data=price_comp,aes(x=ratio))+
+  geom_histogram(bins=10,aes(y=..count../sum(..count..)),
+                 color="black",fill="pink")+
+  theme_bw()+
+  labs(title="Ratio of BLP/Logit (IV) pricing coefficients",
+       x="ratio",
+       y="Share of BLP Simulations")
+
+
+markup_iv=sp_df_log%>%select(j,markup_iv)
+markup_iv%>%inner_join(select(blp_mc,j,markup_blp=markup_iv))%>%
+  mutate(ratio=markup_blp/markup_iv)%>%
+  ggplot(aes(x=ratio))+
+  geom_histogram(bins=20,aes(y=..count../sum(..count..)),
+                 color="black",fill="cyan")+
+  theme_bw()+
+  labs(title="Ratio of BLP/Logit (IV) Markups (P-MC)",
+       x="ratio",
+       y="Share of 1995 Models")
+
+  
 
 
 ###########################################################################################
@@ -1087,10 +1150,43 @@ kable(all_elastic_df_table,format = "latex",digits = 4,booktabs = T, linesep = "
 ###########################################################################################
 
 
+blp_merger_df=blp_mc%>%inner_join(select(auto_95,j=type,co,loc,ms,pr_s))%>%
+  inner_join(filter(blp_elastic_sum,j==k)%>%select(co=j,elas))
+
+blp_merger_cross=select(blp_elastic_sum,j,k,elas)%>%
+  inner_join(select(auto_95,loc_j=loc,frm_j=frm,j=co))%>%
+  inner_join(select(auto_95,loc_k=loc,frm_k=frm,k=co))
+
+
+logit_merger_cross=elastic_df2%>%select(j=co_1,k=co_2,elas=iv_elas)%>%
+  inner_join(select(auto_95,loc_j=loc,frm_j=frm,j=co))%>%
+  inner_join(select(auto_95,loc_k=loc,frm_k=frm,k=co))
+
+cv_blp_df=demand_res$consumer_betas
+cv_blp_df$alpha_i=cv_blp_df$alpha_i+alpha_price
+cv_blp_betas=select(auto_95,j=co,hp_wt)
+cv_blp_betas$hp_wt=cv_blp_betas$hp_wt*hp_coef
+
+ind_95=which(automobile$ye==95)
+
+cv_blp_betas$delta=demand_res$mean_u[ind_95]
+
+auto_95%>%group_by(loc)%>%
+  summarise(product_count=n(),
+            mkt_share=100*sum(ms),
+            tot_sales=sum(qu*eurpr)/10^9)
 
 
 
-
+merger_function=function(country,demand_model){
+  if(demand_model=="BLP"){
+    temp_merger_df=blp_merger_df%>%mutate(new_firm=ifelse(country==loc,"super_firm",frm_j))
+    new_mkt_share=temp_merger_df%>%group_by(new_firm)%>%
+      summarise(ms_new=sum(ms))
+    
+    
+  }
+}
 
 
 
