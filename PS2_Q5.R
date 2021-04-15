@@ -1432,6 +1432,8 @@ merger_function=function(country,demand_model){
     
     cv1=compen_var(raw_data =cv_iv_df,price_df = price_return,model = demand_model )
     
+    country_name=country_labels$name[country_labels$loc_code==country]
+    
     exectime <- toc()
     exectime <- exectime$toc - exectime$tic
     
@@ -1455,8 +1457,11 @@ demand_list=c("BLP","Logit")
 res_df_final=data.frame()
 price_vec_df=data.frame()
 
+start_time<-Sys.time()
 for(d in 1:length(demand_list)){
   for(c in 1:length(loc_code_list)){
+    m1=paste("Country ",loc_code_list[c], " || Model ",demand_list[d])
+    print(m1)
     welfare=merger_function(country=loc_code_list[c],demand_model = demand_list[d])
     res_df=data.frame(country_name=welfare$country_name,
                       demand_model=welfare$demand_model,
@@ -1473,8 +1478,39 @@ for(d in 1:length(demand_list)){
   }
 }
 
+end_time<-Sys.time()
+
+time_dif=end_time-start_time
+
+country_labels
+
+country_ms=auto_95%>%group_by(loc)%>%
+  summarise(ms=sum(ms))%>%
+  inner_join(country_labels,by=c("loc"="loc_code"))%>%
+  ungroup()%>%
+  select(name,ms)%>%
+  arrange(-ms)
 
 
+
+res_final_ms=res_df_final%>%
+  inner_join(country_ms,by=c("country_name"="name"))
+
+
+ggplot(data=res_final_ms,aes(x=reorder(country_name,ms),y=cv,fill=demand_model))+
+  geom_bar(stat="identity",position = "dodge")+
+  labs(x="Production Country",y="Compensating CV",fill="Demand Model")+
+  ggthemes::theme_clean()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
+
+price_vec_df%>%ggplot(aes(y=price_delta,x=demand_model,fill=demand_model))+
+  geom_boxplot()+
+  facet_wrap(~country_name)+
+  ggthemes::theme_clean()+
+  labs(x="",y="New/Old Price Ratio")+
+  theme(legend.position = "none")
 
 
 
