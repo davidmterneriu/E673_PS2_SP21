@@ -1231,11 +1231,103 @@ sum(r1_blp$share_j)
 
 
 
+merger_min=function(par,delta_jr,mc,price_index,model){
+  warn = getOption("warn")
+  options(warn=-1)
+  price_df=data.frame(j=price_index,price=par)
+ if(model=="BLP"){
+   est_share=share_blp(price_df = price_df,raw_data = cv_consumer_df,alpha_p = alpha_price)
+   delta_mat=delta_jr
+   delta_mat=delta_mat%>%inner_join(select(est_share,j,share_j))%>%
+     inner_join(select(est_share,k=j,share_k=share_j))%>%
+     inner_join(select(price_df,j=j,pr_j=price))%>%
+     inner_join(select(price_df,k=j,pr_k=price))%>%
+     mutate(delta_jr_v=omega_jr*elastic*share_j/pr_k)
+   delta_jr_mat=delta_mat%>%select(j,k,delta_jr_v)%>%
+     pivot_wider(names_from = j, values_from = delta_jr_v)%>%
+     select(-k)%>%
+     as.matrix()
+ }else{
+   est_share=share_logit(price_df =price_df,raw_data = cv_iv_df,alpha_p = alpha_price_iv)
+   delta_mat=delta_jr
+   delta_mat=delta_mat%>%inner_join(select(est_share,j,share_j))%>%
+     inner_join(select(est_share,k=j,share_k=share_j))%>%
+     inner_join(select(price_df,j=j,pr_j=price))%>%
+     inner_join(select(price_df,k=j,pr_k=price))%>%
+     mutate(delta_jr_v=omega_jr*elastic*share_j/pr_k)
+   delta_jr_mat=delta_mat%>%select(j,k,delta_jr_v)%>%
+     pivot_wider(names_from = j, values_from = delta_jr_v)%>%
+     select(-k)%>%
+     as.matrix()
+ }
+  price_guess=price_df$price
+  res=(mc+solve(delta_jr_mat)%*%est_share$share_j)%>%as.numeric()
+  error_vec=(price_guess-res)^2
+  error_res=mean(error_vec)
+  return(error_res)
+  
+}
 
 
+compen_var=function(raw_data,price_df,model){
+
+  temp_df=raw_data
+  
+  if(model=="BLP"){
+    temp_df=inner_join(temp_df,price_df,by="j")
+    
+    alpha_p=alpha_price
+    temp_df=temp_df%>%mutate(alpha_tots=alpha_i+alpha_p,
+                     old_price_beta=old_price*alpha_tots,
+                     new_price_beta=new_price*alpha_tots,
+                     v_old=exp(old_price_beta+mean_u+size_beta+speed_beta),
+                     v_new=exp(new_price_beta+mean_u+size_beta+speed_beta))
+    
+    alpha_vec=raw_data%>%select(sim_number,alpha_i)%>%unique.data.frame()%>%
+      mutate(alpha_tots=alpha_i+alpha_p)%>%
+      select(sim_number,alpha_tots)
+    
+    cv=temp_df%>%group_by(sim_number)%>%
+      summarise(v_1i=log(1+sum(v_new)),
+                           v_0i=log(1+sum(v_old)))%>%
+      ungroup()%>%
+      inner_join(alpha_vec,by="sim_number")%>%
+      summarise(cv=mean(1/abs(alpha_tots)*v_1i-v_0i))
+    cv=cv$cv
+    return(cv)
+    
+    
+  }else{
+    temp_df=raw_data
+    temp_df=rename(temp_df,j=co)
+    temp_df=inner_join(temp_df,price_df,by="j")
+    alph_p=alpha_price_iv
+    cv=temp_df%>%mutate(v_old=exp(old_price*alph_p+x_betas+xi_iv),
+                     v_new=exp(new_price*alph_p+x_betas+xi_iv))%>%
+      summarise(v_1=log(1+sum(v_new)),
+                v_0=log(1+sum(v_old)))%>%
+      mutate(cv=1/abs(alph_p)*(v_1-v_0))
+    cv=cv$cv
+    return(cv)
+  }
+}
+
+
+auto_95$loc
+country_labels <- as.data.frame(attr(auto_95$loc,"labels"))
+colnames(country_labels)<-"loc_code"
+country_labels$name=rownames(country_labels)
+rownames(country_labels)<-c()
+
+
+loc_code_list=country_labels$loc_code
 
 merger_function=function(country,demand_model){
-  browser()
+  #browser()
+  require(tictoc)
+  tic()
+  warn = getOption("warn")
+  options(warn=-1)
   
   old_price_df=select(auto_95,j=co,price=pr_s)
   
@@ -1255,8 +1347,9 @@ merger_function=function(country,demand_model){
     inner_join(select(owner_temp,j,k,new_j,new_k,omega_jr))
   
   non_zero=owner_temp%>%summarise(new_share=mean(omega_jr),old_share=mean(omega_jr_old))
-  
+  #browser()
   if(demand_model=="BLP"){
+
     elast_df=select(blp_elastic_sum,j,k,elastic=elas)
     mc_est=select(blp_mc,j,mc=marginal_cost)%>%
       inner_join(select(auto_95,j=type,co))%>%
@@ -1273,17 +1366,115 @@ merger_function=function(country,demand_model){
       mutate(delta_jr=omega_jr*elastic*share_j/pr_k)
     
     
+    delta_jr_blp_mat=p_approx%>%select(j,k,delta_jr)%>%
+      pivot_wider(names_from = j, values_from = delta_jr)%>%
+      select(-k)%>%
+      as.matrix()
+    
+    p_init_f=(mc_est$mc+solve(delta_jr_blp_mat)%*%old_shares$share_j)%>%as.numeric()
+    
+    delta_df=select(p_approx,j,k,omega_jr,elastic)
+    
+    test_price=data.frame(j=old_price_df$j,price=p_init_f)
+    
+    optimal_p=optim(par=test_price$price,fn=merger_min,mc=mc_est$mc,
+                    price_index=test_price$j,delta_jr=delta_df,model=demand_model,control=list(trace=2))
+    
+    price_return=data.frame(j=old_price_df$j,old_price=old_price_df$price,new_price=optimal_p$par)
+    
+    cv1=compen_var(raw_data =cv_consumer_df,price_df = price_return,model = demand_model )
+    
+    country_name=country_labels$name[country_labels$loc_code==country]
+    
+    exectime <- toc()
+    exectime <- exectime$toc - exectime$tic
+    
+    
+    res_obj=list(price_return=price_return,mse=optimal_p$value,cv=cv1,country_name=country_name,
+                 demand_model=demand_model,runtime=exectime)
+    
+    return(res_obj)
+
+    
   }else{
     elast_df=select(elastic_df2,j=co_1,k=co_2,elastic=iv_elas)
     mc_est=select(logit_mc,j,mc=marginal_cost)%>%
       inner_join(select(auto_95,j=type,co))%>%
       select(j=co,mc)%>%
       unique.data.frame()
+    
+    old_shares=share_logit(price_df =old_price_df,raw_data = cv_iv_df,alpha_p = alpha_price_iv)
+    p_approx=delta_jr_temp%>%inner_join(elast_df)%>%
+      inner_join(select(old_price_df,j=j,pr_j=price))%>%
+      inner_join(select(old_price_df,k=j,pr_k=price))%>%
+      inner_join(select(old_shares,j=j,share_j=share_j))%>%
+      inner_join(select(old_shares,k=j,share_k=share_j))%>%
+      mutate(delta_jr=omega_jr*elastic*share_j/pr_k)
+    
+    delta_jr_logit_mat=p_approx%>%select(j,k,delta_jr)%>%
+      pivot_wider(names_from = j, values_from = delta_jr)%>%
+      select(-k)%>%
+      as.matrix()
+    
+    p_init_f=(mc_est$mc+solve(delta_jr_logit_mat)%*%old_shares$share_j)%>%as.numeric()
+    
+    delta_df=select(p_approx,j,k,omega_jr,elastic)
+    
+    test_price=data.frame(j=old_price_df$j,price=p_init_f)
+    
+    
+    
+    
+    optimal_p=optim(par=test_price$price,fn=merger_min,mc=mc_est$mc,
+                    price_index=test_price$j,delta_jr=delta_df,model=demand_model,control=list(trace=2))
+    
+    price_return=data.frame(j=old_price_df$j,old_price=old_price_df$price,new_price=optimal_p$par)
+    
+    cv1=compen_var(raw_data =cv_iv_df,price_df = price_return,model = demand_model )
+    
+    exectime <- toc()
+    exectime <- exectime$toc - exectime$tic
+    
+    
+    res_obj=list(price_return=price_return,mse=optimal_p$value,cv=cv1,country_name=country_name,
+                 demand_model=demand_model,runtime=exectime)
+    
+    return(res_obj)
   }
   
   
 }
 
-merger_function(country=1,demand_model = "BLP")
+#b1=merger_function(country=1,demand_model = "BLP")
+
+
+
+
+demand_list=c("BLP","Logit")
+
+res_df_final=data.frame()
+price_vec_df=data.frame()
+
+for(d in 1:length(demand_list)){
+  for(c in 1:length(loc_code_list)){
+    welfare=merger_function(country=loc_code_list[c],demand_model = demand_list[d])
+    res_df=data.frame(country_name=welfare$country_name,
+                      demand_model=welfare$demand_model,
+                      mse=welfare$mse,
+                      cv=welfare$cv,
+                      runtime=welfare$runtime)
+    price_vec=welfare$price_return
+    price_vec=price_vec%>%mutate(price_delta=new_price/old_price,
+                       country_name=welfare$country_name,
+                       demand_model=welfare$demand_model)
+    res_df_final=rbind(res_df_final,res_df)
+    price_vec_df=rbind(price_vec_df,price_vec)
+    
+  }
+}
+
+
+
+
 
 
