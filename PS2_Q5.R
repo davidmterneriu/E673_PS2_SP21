@@ -545,14 +545,14 @@ GMMM_fun<-function(betas,ns){
   K=dim(X2)[2]
   set.seed(1234)
   nu_mat=matrix( rnorm(ns*K,mean=0,sd=1), K, ns) 
- 
+  
   mu_mat=matrix(0,nrow(X2),ns)
   for(j in 1:ns){
     for(i in 1:nrow(X2)){
       mu_mat[i,j]<-sum(X2[i,]%*%t(nu_mat[,j])%*%beta_u)
     }
   }
-  
+  #browser()
   delta_jt=m_share_df$delta_jt%>%as.numeric()
   
   counter=0
@@ -688,7 +688,7 @@ blp_demand_est=function(par,ns){
   
  
   rand_df=data.frame(sim_number=paste("X",seq(1,ns,by=1),sep=""),
-                           alpha_i=nu_mat[1,]*beta_u[1]+xi_model$coefficients[1],
+                           alpha_i=nu_mat[1,]*beta_u[1],
                      size_i=nu_mat[2,]*beta_u[2],
                      speed_i=nu_mat[3,]*beta_u[3])
   
@@ -697,7 +697,8 @@ blp_demand_est=function(par,ns){
   return(return_l)
 }
 
-demand_res=blp_demand_est(par=beta_guess,ns=10)
+ns1=20
+demand_res=blp_demand_est(par=beta_guess,ns=ns1)
 
 demand_res$beta_u[1]
 
@@ -706,7 +707,7 @@ demand_res$mean_coeff$coefficients[1]+demand_res$beta_u[1]
 
 demand_res$beta_u%>%round(5)
 demand_res$beta_u%>%round(3)
-demand_res$gmm_val%>%round(3)
+demand_res$gmm_val%>%round(4)
 demand_res$time%>%as.numeric()%>%round(3)
 
 brd_dummy_df$values=as.character(brd_dummy_df$values)
@@ -750,6 +751,9 @@ rand_co_elas=expand.grid(co_1=co_list,
   as.data.frame()
 
 rand_co_elas$elas=0
+
+demand_res_95f=demand_res_95%>%inner_join(select(auto_95,co,pr_s))
+demand_res_95f=demand_res_95f%>%inner_join(demand_res$consumer_betas)
 ###############################################################################
 #Trying new definition of elasticity (04/14/21)
 ###############################################################################
@@ -767,16 +771,16 @@ rand_bits=demand_res$consumer_betas
 
 automobile_test=automobile
 automobile_test$mean_u=demand_res$mean_u
-
+automobile_test$ms=automobile_test$qu/automobile_test$pop
 
 automobile_test=automobile_test%>%filter(ye==95)
 
 p1_list=demand_res_95f$co%>%unique()
-master_elas1=expand.grid(j=p1_list,sim_number=paste("X",seq(1,10,by=1),sep=""))%>%as.data.frame()
+master_elas1=expand.grid(j=p1_list,sim_number=paste("X",seq(1,ns1,by=1),sep=""))%>%as.data.frame()
 
 master_elas1%>%inner_join(select(automobile_test,j=co,ms_j=ms,mean_u,pr_s,size,sp,hp_wt))%>%
   inner_join(rand_bits)%>%
-  mutate(top_est=pr_s*alpha_i+size*size_i+sp*speed_i+demand_res$xi)%>%
+  mutate(top_est=mean_u+pr_s*alpha_i+size*size_i+sp*speed_i)%>%
   group_by(j)%>%
   mutate(bot=1+sum(exp(top_est)),
          share_ij=exp(top_est)/bot,
@@ -787,11 +791,11 @@ master_elas1%>%inner_join(select(automobile_test,j=co,ms_j=ms,mean_u,pr_s,size,s
 
 real_blp_elastic=master_elas1%>%inner_join(select(automobile_test,j=co,ms_j=ms,mean_u,pr_s,size,sp,hp_wt))%>%
   inner_join(rand_bits)%>%
-  mutate(top_est=pr_s*alpha_i+size*size_i+sp*speed_i+demand_res$xi)%>%
+  mutate(top_est=mean_u+pr_s*alpha_i+size*size_i+sp*speed_i)%>%
   group_by(j)%>%
   mutate(bot=1+sum(exp(top_est)),
          share_ij=exp(top_est)/bot,
-         share_2=sum(share_ij/bot))%>%
+         share_2=mean(share_ij/bot))%>%
   ungroup()
 
 
@@ -805,19 +809,47 @@ master_elas=master_elas%>%
   mutate(type=ifelse(j==k,"own","cross"))
 
 
-master_elas%>%filter(type=="own")%>%
+own_elastic=master_elas%>%filter(type=="own")%>%
   group_by(j)%>%
-  summarise(elas=unique(pr_j)/share_j*sum(alpha_i*share_ij*(1-share_ij)))%>%
-  unique.data.frame()
+  summarise(elas=unique(pr_j)/share_j*sum((alpha_price+alpha_i)*share_ij*(1-share_ij)))%>%
+  unique.data.frame()%>%
+  mutate(type="own")%>%
+  mutate(k=j)
 
 
-master_elas%>%filter(type!="own")%>%
+cross_elastic=master_elas%>%filter(type!="own")%>%
   group_by(j,k)%>%
-  summarise(elas=-unique(pr_k)/share_j*sum(alpha_i*share_ij*share_ik))%>%
-  unique.data.frame()%>%View()
+  summarise(elas=-unique(pr_k)/share_j*sum((alpha_price+alpha_i)*share_ij*share_ik))%>%
+  unique.data.frame()%>%
+  mutate(type="cross")
+
+
+
+blp_elastic=rbind(select(own_elastic,j,k,elas,type),select(cross_elastic,j,k,elas,type))
+
+blp_elastic=blp_elastic%>%inner_join(select(automobile_test,j=co,type_j=type,pr_j=pr_s,ms_j=ms,frm_j=frm,loc_j=loc))%>%
+  inner_join(select(automobile_test,k=co,type_k=type,pr_k=pr_s,ms_k=ms,frm_k=frm,loc_k=loc))%>%
+  mutate(delta_jr_blp=ifelse(frm_j==frm_k,-elas*pr_j/ms_j,0))
+
+
+auto_95_list=auto_95f$type%>%as.character()
+
+blp_elastic%>%filter(type_j %in% auto_95_list&type_k %in% auto_95_list)%>%
+  ungroup()%>%
+  select(j=type_j,k=type_k,elas,pr_j,pr_k)%>%
+  unique.data.frame()%>%
+  ggplot(aes(x=reorder(j,pr_j), y=reorder(k,pr_k))) +
+  geom_tile(aes(fill = elas), colour = "grey50")+
+  geom_label(aes(label=round(elas,4)))+
+  labs(x="",y="",fill="Elasticity",title="Random Coefficients Elasticities")+
+  ggthemes::theme_clean()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
 
 ###############################################################################
 
+if(FALSE){
 demand_res_95f=demand_res_95%>%inner_join(select(auto_95,co,pr_s))
 demand_res_95f=demand_res_95f%>%inner_join(demand_res$consumer_betas)
 
@@ -898,7 +930,7 @@ ggplot(elastic_df2, aes(x=reorder(j,pr_j), y=reorder(k,pr_k))) +
   geom_label(aes(label=round(elas,4)))+
   labs(x="",y="",fill="Elasticity",title="Random Coefficients Elasticities")+
   ggthemes::theme_clean()+
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))}
 
 
 
