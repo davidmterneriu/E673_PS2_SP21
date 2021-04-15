@@ -1045,6 +1045,8 @@ sp_df<-elastic_df2%>%select(j,frm_j,ms_1,pr_j)%>%unique.data.frame()
 
 
 sp_df$markup_iv=solve(delta_jr_iv_mat)%*%sp_df$ms_1/sp_df$pr_j*100
+sp_df$mc=sp_df$pr_j-solve(delta_jr_iv_mat)%*%sp_df$ms_1%>%as.numeric()
+
 
 sp_df=sp_df%>%inner_join(select(auto_95,j=type,frm_j=frm,hp_wt,size,sp))
 sp_df_log=sp_df
@@ -1072,6 +1074,8 @@ elastic_df2%>%filter(j %in% auto_95f$type & k %in% auto_95f$type)%>%
   ggthemes::theme_clean()+
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
   facet_wrap(~model)
+
+logit_mc=select(sp_df,j,frm_j,marginal_cost=mc,markup_iv)
 
 
 ###########################################################################################
@@ -1163,31 +1167,123 @@ logit_merger_cross=elastic_df2%>%select(j=co_1,k=co_2,elas=iv_elas)%>%
   inner_join(select(auto_95,loc_k=loc,frm_k=frm,k=co))
 
 cv_blp_df=demand_res$consumer_betas
-cv_blp_df$alpha_i=cv_blp_df$alpha_i+alpha_price
+cv_blp_df$alpha_i=cv_blp_df$alpha_i
 cv_blp_betas=select(auto_95,j=co,hp_wt)
-cv_blp_betas$hp_wt=cv_blp_betas$hp_wt*hp_coef
+cv_blp_betas$hp_wt_beta=cv_blp_betas$hp_wt*hp_coef
 
 ind_95=which(automobile$ye==95)
 
-cv_blp_betas$delta=demand_res$mean_u[ind_95]
+cv_blp_betas$xi=demand_res$xi[ind_95]
+cv_blp_betas$mean_u=demand_res$mean_u[ind_95]
 
 auto_95%>%group_by(loc)%>%
   summarise(product_count=n(),
             mkt_share=100*sum(ms),
             tot_sales=sum(qu*eurpr)/10^9)
 
+cv_consumer_df=expand.grid(sim_number=cv_blp_df$sim_number,j=cv_blp_betas$j)%>%as.data.frame()%>%
+  inner_join(select(cv_blp_betas,j,hp_wt_beta,xi,mean_u))%>%
+  inner_join(cv_blp_df)%>%
+  inner_join(select(auto_95,j=co,size,speed=sp))%>%
+  mutate(size_beta=size_i*size,speed_beta=speed*speed_i)
 
 
-merger_function=function(country,demand_model){
-  if(demand_model=="BLP"){
-    temp_merger_df=blp_merger_df%>%mutate(new_firm=ifelse(country==loc,"super_firm",frm_j))
-    new_mkt_share=temp_merger_df%>%group_by(new_firm)%>%
-      summarise(ms_new=sum(ms))
-    
-    
-  }
+
+share_logit=function(price_df,raw_data,alpha_p){
+  temp_df=raw_data
+  temp_df=temp_df%>%rename(j=co)
+  temp_df=temp_df%>%inner_join(price_df,by="j")
+  
+  
+  temp_df=temp_df%>%mutate(price_alpha=price*alpha_p,
+                           top=x_betas+xi_iv+price_alpha,
+                           bot=1+sum(exp(top)),
+                           share_j=exp(top)/bot)%>%
+    select(j,share_j)
+  return(temp_df)
 }
 
 
+price_df_1=data.frame(j=auto_95$co,price=auto_95$pr_s)
+
+r1_log=share_logit(price_df = price_df_1,raw_data = cv_iv_df,alpha_p = alpha_price_iv)
+sum(r1_log$share_j)
+
+View(cv_consumer_df)
+
+share_blp=function(price_df,raw_data,alpha_p){
+  #browser()
+  temp_df=raw_data
+  temp_df=temp_df%>%inner_join(price_df,by="j")
+  temp_df=temp_df%>%mutate(price_alpha_i=price*(alpha_i+alpha_p),
+                   v_ij=mean_u+size_beta+speed_beta+price_alpha_i,
+                   top=exp(v_ij))%>%
+    group_by(j)%>%
+    summarise(share_j=mean(top/(1+sum(top))))%>%
+    ungroup()%>%
+    select(j,share_j)
+  return(temp_df)
+}
+
+
+r1_blp=share_blp(price_df = price_df_1,raw_data = cv_consumer_df,alpha_p = alpha_price)
+sum(r1_blp$share_j)
+
+
+
+
+
+
+merger_function=function(country,demand_model){
+  browser()
+  
+  old_price_df=select(auto_95,j=co,price=pr_s)
+  
+  
+  owner_temp=expand.grid(j=auto_95$co%>%unique(),k=auto_95$co%>%unique())%>%
+    as.data.frame%>%
+    inner_join(select(auto_95,j=co,frm_j=frm,loc_j=loc))%>%
+    inner_join(select(auto_95,k=co,frm_k=frm,loc_k=loc))%>%
+    mutate(new_j=ifelse(loc_j==country,"super",frm_j),
+           new_k=ifelse(loc_k==country,"super",frm_k),
+           omega_jr=ifelse(new_j==new_k,1,0),
+           omega_jr_old=ifelse(frm_j==frm_k,1,0))
+  
+  
+  delta_jr_temp=expand.grid(j=auto_95$co%>%unique(),k=auto_95$co%>%unique())%>%
+    as.data.frame()%>%
+    inner_join(select(owner_temp,j,k,new_j,new_k,omega_jr))
+  
+  non_zero=owner_temp%>%summarise(new_share=mean(omega_jr),old_share=mean(omega_jr_old))
+  
+  if(demand_model=="BLP"){
+    elast_df=select(blp_elastic_sum,j,k,elastic=elas)
+    mc_est=select(blp_mc,j,mc=marginal_cost)%>%
+      inner_join(select(auto_95,j=type,co))%>%
+      select(j=co,mc)%>%
+      unique.data.frame()
+    
+    old_shares=share_blp(price_df = old_price_df,raw_data = cv_consumer_df,alpha_p = alpha_price)
+    
+    p_approx=delta_jr_temp%>%inner_join(elast_df)%>%
+      inner_join(select(old_price_df,j=j,pr_j=price))%>%
+      inner_join(select(old_price_df,k=j,pr_k=price))%>%
+      inner_join(select(old_shares,j=j,share_j=share_j))%>%
+      inner_join(select(old_shares,k=j,share_k=share_j))%>%
+      mutate(delta_jr=omega_jr*elastic*share_j/pr_k)
+    
+    
+  }else{
+    elast_df=select(elastic_df2,j=co_1,k=co_2,elastic=iv_elas)
+    mc_est=select(logit_mc,j,mc=marginal_cost)%>%
+      inner_join(select(auto_95,j=type,co))%>%
+      select(j=co,mc)%>%
+      unique.data.frame()
+  }
+  
+  
+}
+
+merger_function(country=1,demand_model = "BLP")
 
 
