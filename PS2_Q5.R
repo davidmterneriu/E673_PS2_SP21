@@ -1531,6 +1531,79 @@ b4$price_return%>%
   geom_histogram()
 
 
+b1$price_return%>%View()
+b2$price_return%>%View()
+
+b3$price_return%>%View()
+b4$price_return%>%View()
+
+
+merger_prices_df=b3$price_return%>%select(j,pre_merger_price=old_price,
+                         blp_price=new_price)%>%
+  inner_join(select(b4$price_return,j,logit_price=new_price))%>%
+  select(j,pre_merger_price,logit_price,blp_price)%>%
+  arrange(-pre_merger_price)%>%
+  mutate(logit_price_change=logit_price-pre_merger_price,
+         blp_price_change=blp_price-pre_merger_price,
+         logit_price_ratio=100*(logit_price/pre_merger_price-1),
+         blp_price_ratio=100*(blp_price/pre_merger_price-1))%>%
+  inner_join(select(auto_95,j=co,type))%>%
+  mutate(j=type)%>%
+  select(-type)
+
+
+kableExtra::kable(merger_prices_df,format = "latex",booktabs = T, linesep = "",digits = 2)
+
+
+blp_post_price=select(b3$price_return,j,price=new_price)
+blp_shares=share_blp(price_df = blp_post_price,raw_data = cv_consumer_df,alpha_p = alpha_price)
+
+logit_post_price=select(b4$price_return,j,price=new_price)
+logit_shares=share_logit(price_df =logit_post_price,raw_data = cv_iv_df,alpha_p = alpha_price_iv)
+
+
+var_profits_blp=select(b3$price_return,j,old_price,new_price)%>%
+  inner_join(select(auto_95,j=co,loc,type,ms,qu))%>%
+  inner_join(select(blp_mc,type=j,frm_j,marginal_cost))%>%
+  inner_join(blp_shares)%>%
+  mutate(ms_change=share_j/ms,
+         ms_change2=share_j-ms,
+         price_change=new_price/old_price,
+         price_dif=new_price-old_price,
+         q_new=qu*ms_change,
+         old_profit=1000*(old_price-marginal_cost)*qu,
+         new_profit=1000*(new_price-marginal_cost)*q_new,
+         profit_change=(new_profit-old_profit)/(10^6),
+         profit_ratio=new_profit/old_profit)%>%
+  mutate(german_dummy=ifelse(loc==4,"German","Other"),
+         loss_status=ifelse(profit_change>0,"Gain","Loss"))
+
+
+var_profits_blp%>%ggplot(aes(x=reorder(type,profit_change),y=profit_change,fill=german_dummy))+
+  geom_bar(stat="identity")+
+  labs(x="Model",y="Profit Change (mil)",
+       title="Variable Profit Change Post Merger (BLP Demand)",
+       fill="Country")+
+  facet_wrap(~loss_status,scales = "free_x")+
+  ggthemes::theme_clean()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ggthemes::scale_fill_fivethirtyeight()
+  
+
+mod3=lm(data=var_profits_blp, profit_change~german_dummy+price_dif,weights = ms)
+summary(mod3)
+
+
+var_profits_logit=select(b4$price_return,j,old_price,new_price)%>%
+  inner_join(select(auto_95,j=co,loc,type,ms,qu))%>%
+  inner_join(select(logit_mc,type=j,frm_j,marginal_cost))
+
+
+
+
+
+
 
 demand_list=c("BLP","Logit")
 
